@@ -16,7 +16,8 @@ Pixelizer is a desktop image tool for turning PNG, JPG, and BMP files into pixel
 - PNG/JPG/BMP import via `stb_image`
 - Drag-and-drop image import with replace confirmation
 - PNG export via `stb_image_write`
-- Lospec `.hex` palette import with persistent palette list and deletion
+- Lospec `.hex` palette import plus in-app palette creation, color editing, color deletion, save, save-new, and palette deletion
+- Palettes are limited to 256 colors, whether imported or created in the app
 - Palette mapping or simpler per-channel color reduction
 - Block pixelization with linear-light block averaging
 - Optional Bayer, deterministic blue-noise, Floyd-Steinberg, Jarvis-Judice-Ninke, Atkinson, or Riemersma dithering with percentage control and selectable Bayer pattern sizes

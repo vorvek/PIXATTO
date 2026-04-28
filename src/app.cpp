@@ -220,6 +220,30 @@ Color32 icon_color_at(int x, int y)
     return gradient > threshold ? light : dark;
 }
 
+std::array<float, 3> color_to_rgb_floats(Color32 color)
+{
+    return {
+        color.r / 255.0F,
+        color.g / 255.0F,
+        color.b / 255.0F,
+    };
+}
+
+ImVec4 color_to_imgui(Color32 color)
+{
+    return ImVec4(color.r / 255.0F, color.g / 255.0F, color.b / 255.0F, 1.0F);
+}
+
+Color32 color_from_rgb_floats(const std::array<float, 3>& color)
+{
+    return {
+        static_cast<std::uint8_t>(std::lround(std::clamp(color[0], 0.0F, 1.0F) * 255.0F)),
+        static_cast<std::uint8_t>(std::lround(std::clamp(color[1], 0.0F, 1.0F) * 255.0F)),
+        static_cast<std::uint8_t>(std::lround(std::clamp(color[2], 0.0F, 1.0F) * 255.0F)),
+        255,
+    };
+}
+
 void set_window_icon(SDL_Window* window)
 {
     static constexpr int kIconSourceSize = 16;
@@ -398,6 +422,8 @@ void App::render_frame()
     render_number_edit_popup();
     render_drop_confirm_popup();
     render_delete_palette_popup();
+    render_palette_color_popup();
+    render_save_palette_popup();
 
     ImGui::Render();
 
@@ -470,16 +496,20 @@ void App::render_controls()
     }
 
     if (settings_.use_palette) {
-        if (palettes_.empty()) {
-            ImGui::TextDisabled("No palettes imported.");
-        } else {
-            if (selected_palette_ < 0 || selected_palette_ >= static_cast<int>(palettes_.size())) {
-                selected_palette_ = 0;
-                settings_.palette = palettes_[0].colors;
-                mark_dirty();
-            }
+        if (selected_palette_ >= static_cast<int>(palettes_.size())) {
+            selected_palette_ = -1;
+        }
+        if (!palettes_.empty() && selected_palette_ < 0 && settings_.palette.empty()) {
+            selected_palette_ = 0;
+            settings_.palette = palettes_[0].colors;
+            mark_dirty();
+        }
 
-            const char* preview = selected_palette_ >= 0 ? palettes_[static_cast<std::size_t>(selected_palette_)].name.c_str() : "Palette";
+        const bool has_saved_selection = selected_palette_ >= 0 && selected_palette_ < static_cast<int>(palettes_.size());
+        if (palettes_.empty()) {
+            ImGui::TextDisabled("No palettes saved.");
+        } else {
+            const char* preview = has_saved_selection ? palettes_[static_cast<std::size_t>(selected_palette_)].name.c_str() : "Unsaved palette";
             if (ImGui::BeginCombo("Palette", preview)) {
                 for (int i = 0; i < static_cast<int>(palettes_.size()); ++i) {
                     const bool selected = selected_palette_ == i;
@@ -494,27 +524,72 @@ void App::render_controls()
                 }
                 ImGui::EndCombo();
             }
+        }
 
-            if (selected_palette_ >= 0 && selected_palette_ < static_cast<int>(palettes_.size())) {
-                if (ImGui::Button("Delete Palette")) {
-                    request_delete_selected_palette();
-                }
-                ImGui::Spacing();
+        if (ImGui::Button("New Palette")) {
+            request_new_palette();
+        }
+        ImGui::SameLine();
 
-                ImGui::Text("%zu colors", palettes_[static_cast<std::size_t>(selected_palette_)].colors.size());
-                const float swatch = 16.0F;
-                const float start_x = ImGui::GetCursorScreenPos().x;
-                const float max_x = start_x + ImGui::GetContentRegionAvail().x;
-                const auto& colors = palettes_[static_cast<std::size_t>(selected_palette_)].colors;
-                for (std::size_t color_index = 0; color_index < colors.size(); ++color_index) {
-                    const Color32 color = colors[color_index];
-                    ImGui::PushID(static_cast<int>(color_index));
-                    ImGui::ColorButton("swatch", ImVec4(color.r / 255.0F, color.g / 255.0F, color.b / 255.0F, 1.0F), ImGuiColorEditFlags_NoTooltip, ImVec2(swatch, swatch));
-                    ImGui::PopID();
-                    if (ImGui::GetItemRectMax().x + swatch + ImGui::GetStyle().ItemSpacing.x < max_x) {
-                        ImGui::SameLine();
-                    }
-                }
+        const bool can_save = has_saved_selection && !settings_.palette.empty();
+        if (!can_save) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button("Save")) {
+            request_save_palette();
+        }
+        if (!can_save) {
+            ImGui::EndDisabled();
+        }
+        ImGui::SameLine();
+
+        const bool can_save_new = !settings_.palette.empty();
+        if (!can_save_new) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button("Save New")) {
+            request_save_palette_as();
+        }
+        if (!can_save_new) {
+            ImGui::EndDisabled();
+        }
+
+        if (has_saved_selection) {
+            if (ImGui::Button("Delete Palette")) {
+                request_delete_selected_palette();
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Text("%zu / %zu colors", settings_.palette.size(), kMaxPaletteColors);
+        if (settings_.palette.empty()) {
+            ImGui::TextDisabled("Add a color to begin.");
+        }
+
+        const float swatch = 16.0F;
+        const float start_x = ImGui::GetCursorScreenPos().x;
+        const float max_x = start_x + ImGui::GetContentRegionAvail().x;
+        for (std::size_t color_index = 0; color_index < settings_.palette.size(); ++color_index) {
+            const Color32 color = settings_.palette[color_index];
+            ImGui::PushID(static_cast<int>(color_index));
+            if (ImGui::ColorButton("swatch", color_to_imgui(color), ImGuiColorEditFlags_NoTooltip, ImVec2(swatch, swatch))) {
+                request_edit_palette_color(color_index);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Edit color %zu", color_index + 1U);
+            }
+            ImGui::PopID();
+            if (ImGui::GetItemRectMax().x + swatch + ImGui::GetStyle().ItemSpacing.x < max_x) {
+                ImGui::SameLine();
+            }
+        }
+
+        if (settings_.palette.size() < kMaxPaletteColors) {
+            if (ImGui::Button("+##AddPaletteColor", ImVec2(swatch, swatch))) {
+                request_add_palette_color();
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Add color");
             }
         }
     } else {
@@ -873,10 +948,142 @@ void App::render_delete_palette_popup()
     }
 }
 
+void App::render_palette_color_popup()
+{
+    static constexpr const char* kPopupId = "Palette color";
+
+    if (palette_color_edit_ && palette_color_edit_->request_open) {
+        ImGui::OpenPopup(kPopupId);
+        palette_color_edit_->request_open = false;
+    }
+
+    if (!palette_color_edit_) {
+        return;
+    }
+
+    bool popup_open = true;
+    bool reset_popup = false;
+    if (ImGui::BeginPopupModal(kPopupId, &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted(palette_color_edit_->adding ? "Add palette color" : "Edit palette color");
+        ImGui::ColorPicker3(
+            "##PaletteColorPicker",
+            palette_color_edit_->color.data(),
+            ImGuiColorEditFlags_DisplayRGB | ImGuiColorEditFlags_InputRGB);
+
+        const bool adding = palette_color_edit_->adding;
+        if (ImGui::Button(adding ? "Add" : "Apply")) {
+            if (adding) {
+                if (settings_.palette.size() >= kMaxPaletteColors) {
+                    set_status("Palette already has 256 colors.");
+                } else {
+                    settings_.palette.push_back(color_from_rgb_floats(palette_color_edit_->color));
+                    mark_dirty();
+                    commit_history_change(palette_color_edit_->before);
+                    set_status("Added palette color.");
+                    ImGui::CloseCurrentPopup();
+                    reset_popup = true;
+                }
+            } else {
+                const int index = palette_color_edit_->index;
+                if (index < 0 || index >= static_cast<int>(settings_.palette.size())) {
+                    set_status("Palette color no longer exists.");
+                } else {
+                    settings_.palette[static_cast<std::size_t>(index)] = color_from_rgb_floats(palette_color_edit_->color);
+                    mark_dirty();
+                    commit_history_change(palette_color_edit_->before);
+                    set_status("Updated palette color.");
+                    ImGui::CloseCurrentPopup();
+                    reset_popup = true;
+                }
+            }
+        }
+
+        ImGui::SameLine();
+        const bool can_delete = !palette_color_edit_->adding
+            && palette_color_edit_->index >= 0
+            && palette_color_edit_->index < static_cast<int>(settings_.palette.size());
+        if (!can_delete) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button("Delete Color")) {
+            settings_.palette.erase(settings_.palette.begin() + palette_color_edit_->index);
+            mark_dirty();
+            commit_history_change(palette_color_edit_->before);
+            set_status("Deleted palette color.");
+            ImGui::CloseCurrentPopup();
+            reset_popup = true;
+        }
+        if (!can_delete) {
+            ImGui::EndDisabled();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel") || !popup_open) {
+            ImGui::CloseCurrentPopup();
+            reset_popup = true;
+        }
+
+        ImGui::EndPopup();
+    } else if (!ImGui::IsPopupOpen(kPopupId)) {
+        reset_popup = true;
+    }
+
+    if (reset_popup) {
+        palette_color_edit_.reset();
+    }
+}
+
+void App::render_save_palette_popup()
+{
+    static constexpr const char* kPopupId = "Save palette as";
+
+    if (palette_save_as_ && palette_save_as_->request_open) {
+        ImGui::OpenPopup(kPopupId);
+        palette_save_as_->request_open = false;
+    }
+
+    if (!palette_save_as_) {
+        return;
+    }
+
+    bool popup_open = true;
+    bool reset_popup = false;
+    if (ImGui::BeginPopupModal(kPopupId, &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted("Palette name");
+        ImGui::SetNextItemWidth(260.0F);
+        const bool submitted = ImGui::InputText(
+            "##PaletteName",
+            palette_save_as_->name.data(),
+            palette_save_as_->name.size(),
+            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+
+        const bool save_clicked = ImGui::Button("Save");
+        if (submitted || save_clicked) {
+            if (save_palette_as_name(palette_save_as_->name.data())) {
+                ImGui::CloseCurrentPopup();
+                reset_popup = true;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel") || !popup_open) {
+            ImGui::CloseCurrentPopup();
+            reset_popup = true;
+        }
+
+        ImGui::EndPopup();
+    } else if (!ImGui::IsPopupOpen(kPopupId)) {
+        reset_popup = true;
+    }
+
+    if (reset_popup) {
+        palette_save_as_.reset();
+    }
+}
+
 void App::handle_shortcuts()
 {
     ImGuiIO& io = ImGui::GetIO();
-    if (number_edit_ || io.WantTextInput || !io.KeyCtrl || !ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
+    if (number_edit_ || palette_color_edit_ || palette_save_as_ || io.WantTextInput || !io.KeyCtrl || !ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
         return;
     }
 
@@ -1051,6 +1258,90 @@ void App::import_palette_from_path(const std::filesystem::path& path)
     set_status("Imported palette " + palette.name + ".");
 }
 
+void App::request_new_palette()
+{
+    selected_palette_ = -1;
+    settings_.use_palette = true;
+    settings_.palette = {
+        Color32{8, 10, 14, 255},
+        Color32{238, 142, 45, 255},
+    };
+    mark_dirty();
+    set_status("Started a new unsaved palette.");
+}
+
+void App::request_add_palette_color()
+{
+    if (settings_.palette.size() >= kMaxPaletteColors) {
+        set_status("Palette already has 256 colors.");
+        return;
+    }
+
+    const Color32 seed = settings_.palette.empty() ? Color32{255, 255, 255, 255} : settings_.palette.back();
+    active_edit_snapshot_.reset();
+    palette_color_edit_ = PaletteColorEditState{
+        static_cast<int>(settings_.palette.size()),
+        true,
+        true,
+        color_to_rgb_floats(seed),
+        capture_history_snapshot(),
+    };
+}
+
+void App::request_edit_palette_color(std::size_t index)
+{
+    if (index >= settings_.palette.size()) {
+        set_status("Palette color no longer exists.");
+        return;
+    }
+
+    active_edit_snapshot_.reset();
+    palette_color_edit_ = PaletteColorEditState{
+        static_cast<int>(index),
+        false,
+        true,
+        color_to_rgb_floats(settings_.palette[index]),
+        capture_history_snapshot(),
+    };
+}
+
+void App::request_save_palette()
+{
+    if (selected_palette_ < 0 || selected_palette_ >= static_cast<int>(palettes_.size())) {
+        set_status("Use Save New for unsaved palettes.");
+        return;
+    }
+
+    const Palette selected = palettes_[static_cast<std::size_t>(selected_palette_)];
+    std::string error;
+    if (!overwrite_palette_file(selected, settings_.palette, error)) {
+        set_status("Palette save failed: " + error);
+        return;
+    }
+
+    refresh_palettes();
+    select_palette_by_path(selected.path);
+    set_status("Saved palette " + selected.name + ".");
+}
+
+void App::request_save_palette_as()
+{
+    if (settings_.palette.empty()) {
+        set_status("Add at least one color before saving.");
+        return;
+    }
+
+    std::string name = "custom-palette";
+    if (selected_palette_ >= 0 && selected_palette_ < static_cast<int>(palettes_.size())) {
+        name = palettes_[static_cast<std::size_t>(selected_palette_)].name + "-copy";
+    }
+
+    PaletteSaveAsState state;
+    std::snprintf(state.name.data(), state.name.size(), "%s", name.c_str());
+    state.request_open = true;
+    palette_save_as_ = state;
+}
+
 void App::request_delete_selected_palette()
 {
     if (selected_palette_ < 0 || selected_palette_ >= static_cast<int>(palettes_.size())) {
@@ -1060,6 +1351,36 @@ void App::request_delete_selected_palette()
 
     pending_delete_palette_ = palettes_[static_cast<std::size_t>(selected_palette_)];
     open_delete_palette_confirm_ = true;
+}
+
+bool App::save_palette_as_name(const std::string& name)
+{
+    Palette saved;
+    std::string error;
+    if (!save_palette_as_new(name, settings_.palette, saved, error)) {
+        set_status("Palette save failed: " + error);
+        return false;
+    }
+
+    refresh_palettes();
+    select_palette_by_path(saved.path);
+    settings_.use_palette = true;
+    set_status("Saved palette " + saved.name + ".");
+    return true;
+}
+
+bool App::select_palette_by_path(const std::filesystem::path& path)
+{
+    for (int i = 0; i < static_cast<int>(palettes_.size()); ++i) {
+        if (palettes_[static_cast<std::size_t>(i)].path == path) {
+            selected_palette_ = i;
+            settings_.palette = palettes_[static_cast<std::size_t>(i)].colors;
+            return true;
+        }
+    }
+
+    selected_palette_ = -1;
+    return false;
 }
 
 void App::delete_pending_palette()

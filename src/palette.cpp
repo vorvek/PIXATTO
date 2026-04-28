@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 
 namespace pixelizer {
@@ -36,6 +37,85 @@ std::string lowercase(std::string value)
         return static_cast<char>(std::tolower(ch));
     });
     return value;
+}
+
+std::string sanitized_palette_stem(std::string name)
+{
+    name = trim(std::move(name));
+    if (name.empty()) {
+        return "palette";
+    }
+
+    std::string sanitized;
+    sanitized.reserve(name.size());
+    bool previous_dash = false;
+    for (const unsigned char ch : name) {
+        const bool keep = std::isalnum(ch) != 0 || ch == '_' || ch == '-';
+        if (keep) {
+            sanitized.push_back(static_cast<char>(std::tolower(ch)));
+            previous_dash = false;
+        } else if (!previous_dash) {
+            sanitized.push_back('-');
+            previous_dash = true;
+        }
+    }
+
+    while (!sanitized.empty() && sanitized.back() == '-') {
+        sanitized.pop_back();
+    }
+    return sanitized.empty() ? "palette" : sanitized;
+}
+
+bool validate_palette_colors(const std::vector<Color32>& colors, std::string& error)
+{
+    if (colors.empty()) {
+        error = "Palette must contain at least one color.";
+        return false;
+    }
+    if (colors.size() > kMaxPaletteColors) {
+        error = "Palettes are limited to 256 colors.";
+        return false;
+    }
+    return true;
+}
+
+bool write_palette_file(const std::filesystem::path& path, const std::vector<Color32>& colors, std::string& error)
+{
+    if (!validate_palette_colors(colors, error)) {
+        return false;
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+        error = ec.message();
+        return false;
+    }
+
+    std::ofstream output(path, std::ios::trunc);
+    if (!output) {
+        error = "Unable to write palette file.";
+        return false;
+    }
+
+    output << std::uppercase << std::hex << std::setfill('0');
+    for (std::size_t index = 0; index < colors.size(); ++index) {
+        const Color32 color = colors[index];
+        output << std::setw(2) << static_cast<int>(color.r)
+               << std::setw(2) << static_cast<int>(color.g)
+               << std::setw(2) << static_cast<int>(color.b);
+        if ((index + 1U) % 8U == 0U || index + 1U == colors.size()) {
+            output << '\n';
+        } else {
+            output << ' ';
+        }
+    }
+
+    if (!output) {
+        error = "Palette file write failed.";
+        return false;
+    }
+    return true;
 }
 
 int hex_value(char ch)
@@ -113,6 +193,10 @@ bool load_palette_file(const std::filesystem::path& path, Palette& palette, std:
         while (parts >> token) {
             Color32 color;
             if (parse_hex_color(token, color)) {
+                if (palette.colors.size() >= kMaxPaletteColors) {
+                    error = "Palettes are limited to 256 colors.";
+                    return false;
+                }
                 palette.colors.push_back(color);
             }
         }
@@ -191,6 +275,47 @@ bool delete_palette_file(const Palette& palette, std::string& error)
     }
 
     return true;
+}
+
+bool overwrite_palette_file(const Palette& palette, const std::vector<Color32>& colors, std::string& error)
+{
+    if (palette.path.empty()) {
+        error = "No saved palette is selected.";
+        return false;
+    }
+    if (lowercase(palette.path.extension().string()) != ".hex") {
+        error = "Only saved .hex palettes can be overwritten.";
+        return false;
+    }
+    return write_palette_file(palette.path, colors, error);
+}
+
+bool save_palette_as_new(const std::string& name, const std::vector<Color32>& colors, Palette& saved, std::string& error)
+{
+    if (!validate_palette_colors(colors, error)) {
+        return false;
+    }
+
+    const auto dir = palette_dir();
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) {
+        error = ec.message();
+        return false;
+    }
+
+    const std::string stem = sanitized_palette_stem(name);
+    auto destination = dir / (stem + ".hex");
+    int suffix = 1;
+    while (std::filesystem::exists(destination)) {
+        destination = dir / (stem + "-" + std::to_string(suffix) + ".hex");
+        ++suffix;
+    }
+
+    if (!write_palette_file(destination, colors, error)) {
+        return false;
+    }
+    return load_palette_file(destination, saved, error);
 }
 
 std::vector<Palette> load_saved_palettes()

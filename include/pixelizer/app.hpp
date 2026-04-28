@@ -6,6 +6,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -68,6 +69,17 @@ private:
         HistorySnapshot before;
         std::function<void(double)> apply;
     };
+    struct PaletteColorEditState {
+        int index = -1;
+        bool adding = false;
+        bool request_open = false;
+        std::array<float, 3> color{};
+        HistorySnapshot before;
+    };
+    struct PaletteSaveAsState {
+        std::array<char, 128> name{};
+        bool request_open = false;
+    };
 
     static void SDLCALL dialog_callback(void* userdata, const char* const* filelist, int filter);
 
@@ -81,6 +93,8 @@ private:
     void render_number_edit_popup();
     void render_drop_confirm_popup();
     void render_delete_palette_popup();
+    void render_palette_color_popup();
+    void render_save_palette_popup();
     void handle_shortcuts();
     void update_preview_if_needed();
     void rebuild_texture(Texture& texture, const Image& image, bool nearest);
@@ -92,7 +106,14 @@ private:
     void handle_dropped_image(const std::filesystem::path& path);
     void load_image_from_path(const std::filesystem::path& path);
     void import_palette_from_path(const std::filesystem::path& path);
+    void request_new_palette();
+    void request_add_palette_color();
+    void request_edit_palette_color(std::size_t index);
+    void request_save_palette();
+    void request_save_palette_as();
     void request_delete_selected_palette();
+    bool save_palette_as_name(const std::string& name);
+    bool select_palette_by_path(const std::filesystem::path& path);
     void delete_pending_palette();
     void export_result_to_path(const std::filesystem::path& path);
     void refresh_palettes();
@@ -139,6 +160,8 @@ private:
     bool open_delete_palette_confirm_ = false;
     std::optional<HistorySnapshot> active_edit_snapshot_;
     std::optional<NumberEditState> number_edit_;
+    std::optional<PaletteColorEditState> palette_color_edit_;
+    std::optional<PaletteSaveAsState> palette_save_as_;
     std::vector<HistorySnapshot> undo_stack_;
     std::vector<HistorySnapshot> redo_stack_;
 
