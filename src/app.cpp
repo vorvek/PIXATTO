@@ -466,12 +466,22 @@ void App::render_menu_bar()
         request_export_png();
     }
     ImGui::SameLine();
-    const bool side_by_side = viewport_layout_ == ViewportLayout::SideBySide;
-    if (ImGui::Button(side_by_side ? "Stack Views" : "Side by Side")) {
-        viewport_layout_ = viewport_layout_ == ViewportLayout::SideBySide ? ViewportLayout::Stacked : ViewportLayout::SideBySide;
+    const bool single_viewport = viewport_mode_ == ViewportMode::Single;
+    if (ImGui::Button(single_viewport ? "Two Views" : "One View")) {
+        viewport_mode_ = single_viewport ? ViewportMode::Split : ViewportMode::Single;
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(side_by_side ? "Show result on top and original on bottom." : "Show original left and result right.");
+        ImGui::SetTooltip(single_viewport ? "Show original and result viewports." : "Show only the result viewport.");
+    }
+    if (viewport_mode_ == ViewportMode::Split) {
+        ImGui::SameLine();
+        const bool side_by_side = viewport_layout_ == ViewportLayout::SideBySide;
+        if (ImGui::Button(side_by_side ? "Stack Views" : "Side by Side")) {
+            viewport_layout_ = viewport_layout_ == ViewportLayout::SideBySide ? ViewportLayout::Stacked : ViewportLayout::SideBySide;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(side_by_side ? "Show result on top and original on bottom." : "Show original left and result right.");
+        }
     }
     ImGui::SameLine();
     ImGui::Separator();
@@ -724,6 +734,13 @@ void App::render_viewports()
 {
     const ImVec2 available = ImGui::GetContentRegionAvail();
     if (available.x <= 0.0F || available.y <= 0.0F) {
+        return;
+    }
+
+    if (viewport_mode_ == ViewportMode::Single) {
+        ImGui::BeginChild("ResultPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
+        render_image_view("Result", result_texture_, result_zoom_);
+        ImGui::EndChild();
         return;
     }
 

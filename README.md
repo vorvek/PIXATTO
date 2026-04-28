@@ -8,7 +8,7 @@ Pixelizer is a desktop image tool for turning PNG, JPG, and BMP files into pseud
 
 ## Features
 
-- Side-by-side original and processed image viewports, plus a stacked layout with the result above the source image
+- Default single result viewport, with optional side-by-side or stacked original/result viewports
 - Draggable viewport splitter for resizing the preview panes
 - Independent zoom for original and result previews
 - Undo/redo for processing edits with Ctrl+Z and Ctrl+Shift+Z

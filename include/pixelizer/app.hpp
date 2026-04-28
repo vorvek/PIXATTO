@@ -45,6 +45,11 @@ private:
         Stacked,
     };
 
+    enum class ViewportMode {
+        Single,
+        Split,
+    };
+
     struct PendingDialog {
         DialogKind kind;
         std::string path;
@@ -162,6 +167,7 @@ private:
     float original_zoom_ = 1.0F;
     float result_zoom_ = 1.0F;
     float viewport_split_ratio_ = 0.5F;
+    ViewportMode viewport_mode_ = ViewportMode::Single;
     ViewportLayout viewport_layout_ = ViewportLayout::SideBySide;
     bool running_ = false;
     std::string status_ = "Open an image to begin.";
