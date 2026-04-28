@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.4 - 2026-04-28
+
+- Fixed manual numeric entry so clicking Apply parses and uses the typed value before closing the dialog.
+
 ## 1.1.3 - 2026-04-28
 
 - Improved preview update performance by caching adjustment and color-space lookup data instead of recomputing it for every source pixel.

@@ -8,10 +8,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <chrono>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -181,6 +183,50 @@ bool render_splitter(const char* id, ImVec2 size, ImGuiMouseCursor cursor, float
     const ImVec2 mouse_delta = ImGui::GetIO().MouseDelta;
     delta = cursor == ImGuiMouseCursor_ResizeEW ? mouse_delta.x : mouse_delta.y;
     return delta != 0.0F;
+}
+
+const char* skip_spaces(const char* text)
+{
+    while (*text != '\0' && std::isspace(static_cast<unsigned char>(*text)) != 0) {
+        ++text;
+    }
+    return text;
+}
+
+bool consumed_full_number(const char* end, bool allow_percent)
+{
+    end = skip_spaces(end);
+    if (allow_percent && *end == '%') {
+        end = skip_spaces(end + 1);
+    }
+    return *end == '\0';
+}
+
+bool parse_number_edit_input(const char* input, bool integer, double& value)
+{
+    input = skip_spaces(input);
+    if (*input == '\0') {
+        return false;
+    }
+
+    errno = 0;
+    char* end = nullptr;
+    if (integer) {
+        const long parsed = std::strtol(input, &end, 10);
+        if (end == input || errno == ERANGE || !consumed_full_number(end, false)) {
+            return false;
+        }
+        value = static_cast<double>(parsed);
+        return true;
+    }
+
+    const double parsed = std::strtod(input, &end);
+    if (end == input || errno == ERANGE || !std::isfinite(parsed) || !consumed_full_number(end, true)) {
+        return false;
+    }
+
+    value = parsed;
+    return true;
 }
 
 Color32 icon_color_at(int x, int y)
@@ -857,22 +903,25 @@ void App::render_number_edit_popup()
         ImGui::TextUnformatted(number_edit_->label.c_str());
         ImGui::SetNextItemWidth(220.0F);
 
-        bool submitted = false;
-        if (number_edit_->integer) {
-            int value = static_cast<int>(std::lround(number_edit_->value));
-            submitted = ImGui::InputInt("Value", &value, 1, 10, ImGuiInputTextFlags_EnterReturnsTrue);
-            number_edit_->value = static_cast<double>(value);
-        } else {
-            float value = static_cast<float>(number_edit_->value);
-            submitted = ImGui::InputFloat("Value", &value, 0.0F, 0.0F, number_edit_->format.c_str(), ImGuiInputTextFlags_EnterReturnsTrue);
-            number_edit_->value = static_cast<double>(value);
-        }
+        const bool submitted = ImGui::InputText(
+            "Value",
+            number_edit_->input.data(),
+            number_edit_->input.size(),
+            ImGuiInputTextFlags_EnterReturnsTrue);
 
         const bool apply = submitted || ImGui::Button("Apply");
         ImGui::SameLine();
         const bool cancel = ImGui::Button("Cancel");
 
         if (apply) {
+            double parsed = 0.0;
+            if (!parse_number_edit_input(number_edit_->input.data(), number_edit_->integer, parsed)) {
+                set_status("Invalid value for " + number_edit_->label + ".");
+                ImGui::EndPopup();
+                return;
+            }
+
+            number_edit_->value = parsed;
             const double clamped = std::clamp(number_edit_->value, number_edit_->minimum, number_edit_->maximum);
             number_edit_->apply(clamped);
             normalize_settings();
@@ -1795,17 +1844,25 @@ bool App::slider_float_direct_value(const char* label, float value, float minimu
 void App::open_number_edit(std::string label, double value, double minimum, double maximum, bool integer, std::string format, std::function<void(double)> apply)
 {
     active_edit_snapshot_.reset();
-    number_edit_ = NumberEditState{
-        std::move(label),
-        std::move(format),
-        value,
-        minimum,
-        maximum,
-        integer,
-        true,
-        capture_history_snapshot(),
-        std::move(apply),
-    };
+
+    NumberEditState state;
+    state.label = std::move(label);
+    state.format = std::move(format);
+    state.value = value;
+    state.minimum = minimum;
+    state.maximum = maximum;
+    state.integer = integer;
+    state.request_open = true;
+    state.before = capture_history_snapshot();
+    state.apply = std::move(apply);
+
+    if (state.integer) {
+        std::snprintf(state.input.data(), state.input.size(), "%d", static_cast<int>(std::lround(value)));
+    } else {
+        std::snprintf(state.input.data(), state.input.size(), state.format.c_str(), value);
+    }
+
+    number_edit_ = std::move(state);
 }
 
 } // namespace pixelizer

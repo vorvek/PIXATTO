@@ -66,6 +66,7 @@ private:
     struct NumberEditState {
         std::string label;
         std::string format;
+        std::array<char, 64> input{};
         double value = 0.0;
         double minimum = 0.0;
         double maximum = 0.0;
