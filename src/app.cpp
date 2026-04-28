@@ -170,6 +170,80 @@ bool render_splitter(const char* id, ImVec2 size, ImGuiMouseCursor cursor, float
     return delta != 0.0F;
 }
 
+Color32 icon_color_at(int x, int y)
+{
+    static constexpr std::array<const char*, 16> p_mask = {{
+        "................",
+        "................",
+        "...PPPPPPPPP....",
+        "...PPPPPPPPPP...",
+        "...PPP....PPP...",
+        "...PPP....PPP...",
+        "...PPP....PPP...",
+        "...PPPPPPPPPP...",
+        "...PPPPPPPPP....",
+        "...PPP..........",
+        "...PPP..........",
+        "...PPP..........",
+        "...PPP..........",
+        "...PPP..........",
+        "................",
+        "................",
+    }};
+    static constexpr std::array<std::array<int, 4>, 4> bayer4 = {{
+        {{0, 8, 2, 10}},
+        {{12, 4, 14, 6}},
+        {{3, 11, 1, 9}},
+        {{15, 7, 13, 5}},
+    }};
+
+    static constexpr Color32 frame{3, 5, 10, 255};
+    static constexpr Color32 dark{14, 10, 18, 255};
+    static constexpr Color32 light{255, 146, 45, 255};
+    static constexpr Color32 letter{246, 252, 255, 255};
+    static constexpr Color32 shadow{48, 18, 6, 255};
+
+    if (x == 0 || y == 0 || x == 15 || y == 15) {
+        return frame;
+    }
+
+    if (p_mask[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)] == 'P') {
+        return letter;
+    }
+
+    if (x > 0 && y > 0 && p_mask[static_cast<std::size_t>(y - 1)][static_cast<std::size_t>(x - 1)] == 'P') {
+        return shadow;
+    }
+
+    const float gradient = (static_cast<float>(x) + static_cast<float>(y) * 0.45F) / 21.75F;
+    const float threshold = (static_cast<float>(bayer4[static_cast<std::size_t>(y & 3)][static_cast<std::size_t>(x & 3)]) + 0.5F) / 16.0F;
+    return gradient > threshold ? light : dark;
+}
+
+void set_window_icon(SDL_Window* window)
+{
+    static constexpr int kIconSourceSize = 16;
+    static constexpr int kWindowIconSize = 32;
+    if (!window) {
+        return;
+    }
+
+    SDL_Surface* icon = SDL_CreateSurface(kWindowIconSize, kWindowIconSize, SDL_PIXELFORMAT_RGBA32);
+    if (!icon) {
+        return;
+    }
+
+    for (int y = 0; y < kWindowIconSize; ++y) {
+        for (int x = 0; x < kWindowIconSize; ++x) {
+            const Color32 color = icon_color_at(x * kIconSourceSize / kWindowIconSize, y * kIconSourceSize / kWindowIconSize);
+            SDL_WriteSurfacePixel(icon, x, y, color.r, color.g, color.b, color.a);
+        }
+    }
+
+    SDL_SetWindowIcon(window, icon);
+    SDL_DestroySurface(icon);
+}
+
 } // namespace
 
 struct App::DialogState {
@@ -204,6 +278,7 @@ bool App::initialize()
         set_status(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
         return false;
     }
+    set_window_icon(window_);
 
     renderer_ = SDL_CreateRenderer(window_, nullptr);
     if (!renderer_) {

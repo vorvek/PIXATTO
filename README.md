@@ -1,4 +1,4 @@
-# Pixelizer
+# <img src="assets/icon/pixelizer-icon-32.png" width="32" height="32" alt="Pixelizer icon"> Pixelizer
 
 [![Release](https://github.com/vorvek/Pixelizer/actions/workflows/release.yml/badge.svg)](https://github.com/vorvek/Pixelizer/actions/workflows/release.yml)
 

@@ -8,6 +8,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(FetchContent)
 
+if(WIN32)
+    enable_language(RC)
+    set(PIXELIZER_WINDOWS_ICON "${PROJECT_SOURCE_DIR}/assets/icon/pixelizer.ico")
+    configure_file(
+        src/platform/windows/pixelizer.rc.in
+        "${PROJECT_BINARY_DIR}/pixelizer.rc"
+        @ONLY
+    )
+endif()
+
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
@@ -80,6 +90,10 @@ foreach(optional_source IN ITEMS
         list(APPEND PIXELIZER_APP_SOURCES ${optional_source})
     endif()
 endforeach()
+
+if(WIN32)
+    list(APPEND PIXELIZER_APP_SOURCES "${PROJECT_BINARY_DIR}/pixelizer.rc")
+endif()
 
 add_executable(pixelizer WIN32
     ${PIXELIZER_APP_SOURCES}
