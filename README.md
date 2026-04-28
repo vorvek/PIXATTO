@@ -2,9 +2,9 @@
 
 [![Release](https://github.com/vorvek/Pixelizer/actions/workflows/release.yml/badge.svg)](https://github.com/vorvek/Pixelizer/actions/workflows/release.yml)
 
-Pixelizer is a desktop image tool for turning PNG, JPG, and BMP files into pixel art. It is written in C++20, uses SDL3 and Dear ImGui, and is designed to build on Windows, Linux, and macOS.
+Pixelizer is a desktop image tool for turning PNG, JPG, and BMP files into pseudo-pixel art. It is written in C++20, uses SDL3 and Dear ImGui, and is designed to build on Windows, Linux, and macOS.
 
-![Pixelizer showing an original image beside a processed pixel-art result](docs/pixelizer-in-action.png)
+![Pixelizer showing an original image beside a processed pseudo-pixel-art result](docs/pixelizer-in-action.png)
 
 ## Features
 
