@@ -3,14 +3,42 @@
 #include <SDL3/SDL_filesystem.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <fstream>
 #include <iomanip>
 #include <optional>
 #include <sstream>
+#include <string_view>
 
 namespace pixelizer {
 namespace {
+
+constexpr std::string_view kDefaultPaletteSeedMarker = ".lospec-default-palettes-v1";
+
+constexpr std::array<std::string_view, 21> kDefaultPaletteFiles = {{
+    "pico-8.hex",
+    "dawnbringer-16.hex",
+    "dawnbringer-32.hex",
+    "shmupy-16.hex",
+    "aurora.hex",
+    "db-iso22.hex",
+    "amiga-pixels-64.hex",
+    "2bit-demichrome.hex",
+    "windows-95-256-colours.hex",
+    "microsoft-windows.hex",
+    "commodore64.hex",
+    "commodore-vic-20.hex",
+    "msx.hex",
+    "amstrad-cpc.hex",
+    "cga-palette-1-high.hex",
+    "cga-palette-0-high.hex",
+    "cga-palette-2-high.hex",
+    "cga-palette-1-low.hex",
+    "cga-palette-0-low.hex",
+    "cga-palette-2-low.hex",
+    "apple-ii.hex",
+}};
 
 std::filesystem::path palette_dir()
 {
@@ -22,6 +50,109 @@ std::filesystem::path palette_dir()
     std::filesystem::path base(pref);
     SDL_free(pref);
     return base / "palettes";
+}
+
+void add_asset_palette_dir_candidates(std::vector<std::filesystem::path>& candidates, std::filesystem::path start)
+{
+    std::error_code ec;
+    start = std::filesystem::weakly_canonical(start, ec);
+    if (ec) {
+        start = std::filesystem::absolute(start, ec);
+    }
+    if (start.empty()) {
+        return;
+    }
+
+    for (int depth = 0; depth < 6 && !start.empty(); ++depth) {
+        candidates.push_back(start / "assets" / "palettes");
+        const auto parent = start.parent_path();
+        if (parent == start) {
+            break;
+        }
+        start = parent;
+    }
+}
+
+std::vector<std::filesystem::path> default_palette_dir_candidates()
+{
+    std::vector<std::filesystem::path> candidates;
+    add_asset_palette_dir_candidates(candidates, std::filesystem::current_path());
+
+    const char* base_path = SDL_GetBasePath();
+    if (base_path) {
+        add_asset_palette_dir_candidates(candidates, std::filesystem::path(base_path));
+    }
+
+    std::sort(candidates.begin(), candidates.end());
+    candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+    return candidates;
+}
+
+std::optional<std::filesystem::path> default_palette_source_dir()
+{
+    for (const std::filesystem::path& candidate : default_palette_dir_candidates()) {
+        bool complete = true;
+        for (const std::string_view file : kDefaultPaletteFiles) {
+            std::error_code ec;
+            if (!std::filesystem::is_regular_file(candidate / std::string(file), ec)) {
+                complete = false;
+                break;
+            }
+        }
+        if (complete) {
+            return candidate;
+        }
+    }
+    return std::nullopt;
+}
+
+void seed_default_palettes()
+{
+    const auto dir = palette_dir();
+    const auto marker = dir / std::string(kDefaultPaletteSeedMarker);
+
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) {
+        return;
+    }
+
+    ec.clear();
+    if (std::filesystem::exists(marker, ec) || ec) {
+        return;
+    }
+
+    const std::optional<std::filesystem::path> source_dir = default_palette_source_dir();
+    if (!source_dir) {
+        return;
+    }
+
+    bool seeded = true;
+    for (const std::string_view file : kDefaultPaletteFiles) {
+        const auto source = *source_dir / std::string(file);
+        const auto destination = dir / std::string(file);
+        ec.clear();
+        const bool destination_exists = std::filesystem::exists(destination, ec);
+        if (ec) {
+            seeded = false;
+            continue;
+        }
+        if (destination_exists) {
+            continue;
+        }
+
+        ec.clear();
+        std::filesystem::copy_file(source, destination, std::filesystem::copy_options::none, ec);
+        if (ec) {
+            seeded = false;
+        }
+    }
+
+    if (seeded) {
+        std::ofstream output(marker);
+        output << "Lospec default palettes seeded from bundled .hex files.\n";
+        output << "Delete palettes in the app to keep them removed.\n";
+    }
 }
 
 std::string trim(std::string value)
@@ -384,6 +515,7 @@ std::vector<Palette> load_saved_palettes()
 {
     std::vector<Palette> palettes;
     const auto dir = palette_dir();
+    seed_default_palettes();
 
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);

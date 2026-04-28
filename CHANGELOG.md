@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1 - 2026-04-28
+
+- Added 21 bundled Lospec `.hex` palettes, seeded as normal saved palettes on first launch so they can still be deleted.
+- Added Lospec palette source attribution and direct original `.hex` links to the third-party credits.
+- Copied bundled assets beside local build outputs so default palettes are available from source builds as well as packaged releases.
+
 ## 1.2.0 - 2026-04-28
 
 - Added a language picker with flag icons and localized UI labels for European languages, Simplified and Traditional Chinese, Korean, and Japanese.

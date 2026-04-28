@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Pixelizer VERSION 1.2.0 LANGUAGES C CXX)
+project(Pixelizer VERSION 1.2.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -110,6 +110,12 @@ target_link_libraries(pixelizer
     PRIVATE
         ${PIXELIZER_SDL_TARGET}
         imgui
+)
+
+add_custom_command(TARGET pixelizer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${PROJECT_SOURCE_DIR}/assets"
+        "$<TARGET_FILE_DIR:pixelizer>/assets"
 )
 
 if(MINGW)
