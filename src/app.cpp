@@ -397,6 +397,7 @@ void App::render_frame()
 
     render_number_edit_popup();
     render_drop_confirm_popup();
+    render_delete_palette_popup();
 
     ImGui::Render();
 
@@ -495,6 +496,11 @@ void App::render_controls()
             }
 
             if (selected_palette_ >= 0 && selected_palette_ < static_cast<int>(palettes_.size())) {
+                if (ImGui::Button("Delete Palette")) {
+                    request_delete_selected_palette();
+                }
+                ImGui::Spacing();
+
                 ImGui::Text("%zu colors", palettes_[static_cast<std::size_t>(selected_palette_)].colors.size());
                 const float swatch = 16.0F;
                 const float start_x = ImGui::GetCursorScreenPos().x;
@@ -826,6 +832,47 @@ void App::render_drop_confirm_popup()
     }
 }
 
+void App::render_delete_palette_popup()
+{
+    static constexpr const char* kPopupId = "Delete palette?";
+
+    if (open_delete_palette_confirm_) {
+        ImGui::OpenPopup(kPopupId);
+        open_delete_palette_confirm_ = false;
+    }
+
+    if (!pending_delete_palette_) {
+        return;
+    }
+
+    bool popup_open = true;
+    bool reset_popup = false;
+    if (ImGui::BeginPopupModal(kPopupId, &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted("Delete this saved palette?");
+        ImGui::Spacing();
+        ImGui::TextWrapped("%s", pending_delete_palette_->name.c_str());
+
+        if (ImGui::Button("Delete")) {
+            delete_pending_palette();
+            ImGui::CloseCurrentPopup();
+            reset_popup = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel") || !popup_open) {
+            ImGui::CloseCurrentPopup();
+            reset_popup = true;
+        }
+
+        ImGui::EndPopup();
+    } else if (!ImGui::IsPopupOpen(kPopupId)) {
+        reset_popup = true;
+    }
+
+    if (reset_popup) {
+        pending_delete_palette_.reset();
+    }
+}
+
 void App::handle_shortcuts()
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -1002,6 +1049,35 @@ void App::import_palette_from_path(const std::filesystem::path& path)
     mark_dirty();
     commit_history_change(before);
     set_status("Imported palette " + palette.name + ".");
+}
+
+void App::request_delete_selected_palette()
+{
+    if (selected_palette_ < 0 || selected_palette_ >= static_cast<int>(palettes_.size())) {
+        set_status("No palette selected.");
+        return;
+    }
+
+    pending_delete_palette_ = palettes_[static_cast<std::size_t>(selected_palette_)];
+    open_delete_palette_confirm_ = true;
+}
+
+void App::delete_pending_palette()
+{
+    if (!pending_delete_palette_) {
+        return;
+    }
+
+    const std::string deleted_name = pending_delete_palette_->name;
+    std::string error;
+    if (!delete_palette_file(*pending_delete_palette_, error)) {
+        set_status("Palette delete failed: " + error);
+        return;
+    }
+
+    refresh_palettes();
+    mark_dirty();
+    set_status("Deleted palette " + deleted_name + ".");
 }
 
 void App::export_result_to_path(const std::filesystem::path& path)

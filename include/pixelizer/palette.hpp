@@ -17,6 +17,6 @@ struct Palette {
 std::vector<Palette> load_saved_palettes();
 bool import_palette_file(const std::filesystem::path& source, Palette& imported, std::string& error);
 bool load_palette_file(const std::filesystem::path& path, Palette& palette, std::string& error);
+bool delete_palette_file(const Palette& palette, std::string& error);
 
 } // namespace pixelizer
-

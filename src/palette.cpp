@@ -162,6 +162,37 @@ bool import_palette_file(const std::filesystem::path& source, Palette& imported,
     return load_palette_file(destination, imported, error);
 }
 
+bool delete_palette_file(const Palette& palette, std::string& error)
+{
+    if (palette.path.empty()) {
+        error = "No palette file is selected.";
+        return false;
+    }
+
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(palette.path, ec)) {
+        error = ec ? ec.message() : "Palette file does not exist.";
+        return false;
+    }
+
+    if (lowercase(palette.path.extension().string()) != ".hex") {
+        error = "Only saved .hex palettes can be deleted.";
+        return false;
+    }
+
+    if (!std::filesystem::remove(palette.path, ec)) {
+        error = ec ? ec.message() : "Palette file could not be removed.";
+        return false;
+    }
+
+    if (ec) {
+        error = ec.message();
+        return false;
+    }
+
+    return true;
+}
+
 std::vector<Palette> load_saved_palettes()
 {
     std::vector<Palette> palettes;

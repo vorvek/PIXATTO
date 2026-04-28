@@ -80,6 +80,7 @@ private:
     void render_image_view(const char* label, Texture& texture, float& zoom);
     void render_number_edit_popup();
     void render_drop_confirm_popup();
+    void render_delete_palette_popup();
     void handle_shortcuts();
     void update_preview_if_needed();
     void rebuild_texture(Texture& texture, const Image& image, bool nearest);
@@ -91,6 +92,8 @@ private:
     void handle_dropped_image(const std::filesystem::path& path);
     void load_image_from_path(const std::filesystem::path& path);
     void import_palette_from_path(const std::filesystem::path& path);
+    void request_delete_selected_palette();
+    void delete_pending_palette();
     void export_result_to_path(const std::filesystem::path& path);
     void refresh_palettes();
     void mark_dirty();
@@ -131,7 +134,9 @@ private:
     std::filesystem::path current_image_path_;
     std::optional<std::filesystem::path> last_export_path_;
     std::optional<std::filesystem::path> pending_dropped_image_;
+    std::optional<Palette> pending_delete_palette_;
     bool open_drop_confirm_ = false;
+    bool open_delete_palette_confirm_ = false;
     std::optional<HistorySnapshot> active_edit_snapshot_;
     std::optional<NumberEditState> number_edit_;
     std::vector<HistorySnapshot> undo_stack_;
