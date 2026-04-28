@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -17,8 +18,16 @@ struct Palette {
     std::vector<Color32> colors;
 };
 
+enum class PaletteImportMode {
+    Create,
+    Overwrite,
+};
+
 std::vector<Palette> load_saved_palettes();
-bool import_palette_file(const std::filesystem::path& source, Palette& imported, std::string& error);
+bool validate_import_palette_file(const std::filesystem::path& source, Palette& palette, std::string& error);
+std::optional<Palette> find_import_palette_conflict(const std::filesystem::path& source);
+std::string suggest_import_palette_copy_name(const std::filesystem::path& source);
+bool import_palette_file(const std::filesystem::path& source, PaletteImportMode mode, Palette& imported, std::string& error);
 bool load_palette_file(const std::filesystem::path& path, Palette& palette, std::string& error);
 bool delete_palette_file(const Palette& palette, std::string& error);
 bool overwrite_palette_file(const Palette& palette, const std::vector<Color32>& colors, std::string& error);

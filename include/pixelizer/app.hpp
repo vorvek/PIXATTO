@@ -80,6 +80,14 @@ private:
         std::array<char, 128> name{};
         bool request_open = false;
     };
+    struct PendingPaletteImportState {
+        std::filesystem::path source;
+        Palette parsed;
+        Palette existing;
+        std::array<char, 128> name{};
+        bool request_conflict_open = false;
+        bool request_name_open = false;
+    };
 
     static void SDLCALL dialog_callback(void* userdata, const char* const* filelist, int filter);
 
@@ -93,6 +101,8 @@ private:
     void render_number_edit_popup();
     void render_drop_confirm_popup();
     void render_delete_palette_popup();
+    void render_palette_import_conflict_popup();
+    void render_palette_import_name_popup();
     void render_palette_color_popup();
     void render_save_palette_popup();
     void handle_shortcuts();
@@ -103,9 +113,12 @@ private:
     void request_import_palette();
     void request_export_png();
     void handle_pending_dialogs();
-    void handle_dropped_image(const std::filesystem::path& path);
+    void handle_dropped_file(const std::filesystem::path& path);
     void load_image_from_path(const std::filesystem::path& path);
     void import_palette_from_path(const std::filesystem::path& path);
+    bool import_pending_palette(PaletteImportMode mode);
+    bool save_pending_palette_import_as_name(const std::string& name);
+    void finish_palette_import(const Palette& palette, const std::string& action);
     void request_new_palette();
     void request_add_palette_color();
     void request_edit_palette_color(std::size_t index);
@@ -156,6 +169,7 @@ private:
     std::optional<std::filesystem::path> last_export_path_;
     std::optional<std::filesystem::path> pending_dropped_image_;
     std::optional<Palette> pending_delete_palette_;
+    std::optional<PendingPaletteImportState> pending_palette_import_;
     bool open_drop_confirm_ = false;
     bool open_delete_palette_confirm_ = false;
     std::optional<HistorySnapshot> active_edit_snapshot_;

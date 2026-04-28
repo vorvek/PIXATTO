@@ -99,6 +99,19 @@ std::string ensure_png_extension(std::filesystem::path path)
     return path.string();
 }
 
+std::string lowercase(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+bool has_extension(const std::filesystem::path& path, const char* extension)
+{
+    return lowercase(path.extension().string()) == extension;
+}
+
 float fit_zoom_for_size(int width, int height, ImVec2 available)
 {
     if (width <= 0 || height <= 0) {
@@ -381,7 +394,7 @@ void App::process_events(bool& running)
             running = false;
         }
         if (event.type == SDL_EVENT_DROP_FILE && event.drop.data) {
-            handle_dropped_image(event.drop.data);
+            handle_dropped_file(event.drop.data);
         }
     }
 }
@@ -422,6 +435,8 @@ void App::render_frame()
     render_number_edit_popup();
     render_drop_confirm_popup();
     render_delete_palette_popup();
+    render_palette_import_conflict_popup();
+    render_palette_import_name_popup();
     render_palette_color_popup();
     render_save_palette_popup();
 
@@ -948,6 +963,104 @@ void App::render_delete_palette_popup()
     }
 }
 
+void App::render_palette_import_conflict_popup()
+{
+    static constexpr const char* kPopupId = "Palette already exists";
+
+    const bool popup_active = ImGui::IsPopupOpen(kPopupId);
+    if (pending_palette_import_ && pending_palette_import_->request_conflict_open) {
+        ImGui::OpenPopup(kPopupId);
+        pending_palette_import_->request_conflict_open = false;
+    }
+
+    if (!pending_palette_import_
+        || (!pending_palette_import_->request_conflict_open && !popup_active && !ImGui::IsPopupOpen(kPopupId))) {
+        return;
+    }
+
+    bool popup_open = true;
+    bool reset_popup = false;
+    if (ImGui::BeginPopupModal(kPopupId, &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("%s already exists.", pending_palette_import_->parsed.name.c_str());
+
+        if (ImGui::Button("Overwrite")) {
+            if (import_pending_palette(PaletteImportMode::Overwrite)) {
+                ImGui::CloseCurrentPopup();
+                reset_popup = true;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Keep both")) {
+            const std::string name = suggest_import_palette_copy_name(pending_palette_import_->source);
+            std::snprintf(pending_palette_import_->name.data(), pending_palette_import_->name.size(), "%s", name.c_str());
+            pending_palette_import_->request_name_open = true;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel") || !popup_open) {
+            ImGui::CloseCurrentPopup();
+            reset_popup = true;
+        }
+
+        ImGui::EndPopup();
+    } else if (!ImGui::IsPopupOpen(kPopupId) && !pending_palette_import_->request_name_open) {
+        reset_popup = true;
+    }
+
+    if (reset_popup) {
+        pending_palette_import_.reset();
+    }
+}
+
+void App::render_palette_import_name_popup()
+{
+    static constexpr const char* kPopupId = "Name imported palette";
+
+    const bool popup_active = ImGui::IsPopupOpen(kPopupId);
+    if (pending_palette_import_ && pending_palette_import_->request_name_open) {
+        ImGui::OpenPopup(kPopupId);
+        pending_palette_import_->request_name_open = false;
+    }
+
+    if (!pending_palette_import_
+        || (!pending_palette_import_->request_name_open && !popup_active && !ImGui::IsPopupOpen(kPopupId))) {
+        return;
+    }
+
+    bool popup_open = true;
+    bool reset_popup = false;
+    if (ImGui::BeginPopupModal(kPopupId, &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted("Palette name");
+        ImGui::SetNextItemWidth(260.0F);
+        const bool submitted = ImGui::InputText(
+            "##ImportedPaletteName",
+            pending_palette_import_->name.data(),
+            pending_palette_import_->name.size(),
+            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+
+        const bool save_clicked = ImGui::Button("Save");
+        if (submitted || save_clicked) {
+            if (save_pending_palette_import_as_name(pending_palette_import_->name.data())) {
+                ImGui::CloseCurrentPopup();
+                reset_popup = true;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel") || !popup_open) {
+            ImGui::CloseCurrentPopup();
+            reset_popup = true;
+        }
+
+        ImGui::EndPopup();
+    } else if (!ImGui::IsPopupOpen(kPopupId)) {
+        reset_popup = true;
+    }
+
+    if (reset_popup) {
+        pending_palette_import_.reset();
+    }
+}
+
 void App::render_palette_color_popup()
 {
     static constexpr const char* kPopupId = "Palette color";
@@ -1083,7 +1196,8 @@ void App::render_save_palette_popup()
 void App::handle_shortcuts()
 {
     ImGuiIO& io = ImGui::GetIO();
-    if (number_edit_ || palette_color_edit_ || palette_save_as_ || io.WantTextInput || !io.KeyCtrl || !ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
+    if (number_edit_ || palette_color_edit_ || palette_save_as_ || pending_palette_import_
+        || io.WantTextInput || !io.KeyCtrl || !ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
         return;
     }
 
@@ -1201,9 +1315,14 @@ void App::handle_pending_dialogs()
     }
 }
 
-void App::handle_dropped_image(const std::filesystem::path& path)
+void App::handle_dropped_file(const std::filesystem::path& path)
 {
     if (path.empty()) {
+        return;
+    }
+
+    if (has_extension(path, ".hex")) {
+        import_palette_from_path(path);
         return;
     }
 
@@ -1235,27 +1354,77 @@ void App::load_image_from_path(const std::filesystem::path& path)
 
 void App::import_palette_from_path(const std::filesystem::path& path)
 {
-    Palette palette;
+    Palette parsed;
     std::string error;
-    if (!import_palette_file(path, palette, error)) {
+    if (!validate_import_palette_file(path, parsed, error)) {
         set_status("Palette import failed: " + error);
         return;
     }
 
-    const HistorySnapshot before = capture_history_snapshot();
-    refresh_palettes();
-    for (int i = 0; i < static_cast<int>(palettes_.size()); ++i) {
-        if (palettes_[static_cast<std::size_t>(i)].path == palette.path) {
-            selected_palette_ = i;
-            settings_.palette = palettes_[static_cast<std::size_t>(i)].colors;
-            settings_.use_palette = true;
-            break;
-        }
+    if (auto existing = find_import_palette_conflict(path)) {
+        PendingPaletteImportState state;
+        state.source = path;
+        state.parsed = std::move(parsed);
+        state.existing = std::move(*existing);
+        state.request_conflict_open = true;
+        pending_palette_import_ = std::move(state);
+        return;
     }
 
+    PendingPaletteImportState state;
+    state.source = path;
+    state.parsed = std::move(parsed);
+    pending_palette_import_ = std::move(state);
+    import_pending_palette(PaletteImportMode::Create);
+    pending_palette_import_.reset();
+}
+
+bool App::import_pending_palette(PaletteImportMode mode)
+{
+    if (!pending_palette_import_) {
+        return false;
+    }
+
+    Palette imported;
+    std::string error;
+    if (!import_palette_file(pending_palette_import_->source, mode, imported, error)) {
+        set_status("Palette import failed: " + error);
+        return false;
+    }
+
+    finish_palette_import(imported, mode == PaletteImportMode::Overwrite ? "Overwrote" : "Imported");
+    return true;
+}
+
+bool App::save_pending_palette_import_as_name(const std::string& name)
+{
+    if (!pending_palette_import_) {
+        return false;
+    }
+
+    Palette saved;
+    std::string error;
+    if (!save_palette_as_new(name, pending_palette_import_->parsed.colors, saved, error)) {
+        set_status("Palette import failed: " + error);
+        return false;
+    }
+
+    finish_palette_import(saved, "Imported");
+    return true;
+}
+
+void App::finish_palette_import(const Palette& palette, const std::string& action)
+{
+    const HistorySnapshot before = capture_history_snapshot();
+    refresh_palettes();
+    if (!select_palette_by_path(palette.path)) {
+        selected_palette_ = -1;
+        settings_.palette = palette.colors;
+    }
+    settings_.use_palette = true;
     mark_dirty();
     commit_history_change(before);
-    set_status("Imported palette " + palette.name + ".");
+    set_status(action + " palette " + palette.name + ".");
 }
 
 void App::request_new_palette()

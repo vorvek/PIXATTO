@@ -6,6 +6,7 @@
 #include <cctype>
 #include <fstream>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 
 namespace pixelizer {
@@ -64,6 +65,18 @@ std::string sanitized_palette_stem(std::string name)
         sanitized.pop_back();
     }
     return sanitized.empty() ? "palette" : sanitized;
+}
+
+bool has_hex_extension(const std::filesystem::path& path)
+{
+    return lowercase(path.extension().string()) == ".hex";
+}
+
+std::filesystem::path import_palette_destination(const std::filesystem::path& source)
+{
+    std::filesystem::path normalized_name = source.filename();
+    normalized_name.replace_extension(".hex");
+    return palette_dir() / normalized_name;
 }
 
 bool validate_palette_colors(const std::vector<Color32>& colors, std::string& error)
@@ -132,7 +145,7 @@ int hex_value(char ch)
     return -1;
 }
 
-bool parse_hex_color(std::string token, Color32& color)
+bool parse_hex_color(std::string token, Color32& color, bool allow_alpha)
 {
     token = trim(std::move(token));
     if (token.empty()) {
@@ -142,7 +155,7 @@ bool parse_hex_color(std::string token, Color32& color)
         token.erase(token.begin());
     }
 
-    if (token.size() != 6 && token.size() != 8) {
+    if (token.size() != 6 && (!allow_alpha || token.size() != 8)) {
         return false;
     }
 
@@ -163,10 +176,18 @@ bool parse_hex_color(std::string token, Color32& color)
     return true;
 }
 
-} // namespace
-
-bool load_palette_file(const std::filesystem::path& path, Palette& palette, std::string& error)
+bool load_palette_file_impl(
+    const std::filesystem::path& path,
+    Palette& palette,
+    std::string& error,
+    bool require_hex_extension,
+    bool allow_alpha)
 {
+    if (require_hex_extension && !has_hex_extension(path)) {
+        error = "Only .hex palette files can be imported.";
+        return false;
+    }
+
     std::ifstream input(path);
     if (!input) {
         error = "Unable to open palette file.";
@@ -178,7 +199,13 @@ bool load_palette_file(const std::filesystem::path& path, Palette& palette, std:
     palette.path = path;
 
     std::string line;
+    std::size_t line_number = 0;
     while (std::getline(input, line)) {
+        ++line_number;
+        if (line_number == 1 && line.rfind("\xEF\xBB\xBF", 0) == 0) {
+            line.erase(0, 3);
+        }
+
         const auto semicolon_comment = line.find(';');
         const auto slash_comment = line.find("//");
         const auto comment = std::min(
@@ -192,13 +219,15 @@ bool load_palette_file(const std::filesystem::path& path, Palette& palette, std:
         std::string token;
         while (parts >> token) {
             Color32 color;
-            if (parse_hex_color(token, color)) {
-                if (palette.colors.size() >= kMaxPaletteColors) {
-                    error = "Palettes are limited to 256 colors.";
-                    return false;
-                }
-                palette.colors.push_back(color);
+            if (!parse_hex_color(token, color, allow_alpha)) {
+                error = "Invalid hex color \"" + token + "\" on line " + std::to_string(line_number) + ".";
+                return false;
             }
+            if (palette.colors.size() >= kMaxPaletteColors) {
+                error = "Palettes are limited to 256 colors.";
+                return false;
+            }
+            palette.colors.push_back(color);
         }
     }
 
@@ -210,39 +239,72 @@ bool load_palette_file(const std::filesystem::path& path, Palette& palette, std:
     return true;
 }
 
-bool import_palette_file(const std::filesystem::path& source, Palette& imported, std::string& error)
+} // namespace
+
+bool load_palette_file(const std::filesystem::path& path, Palette& palette, std::string& error)
 {
-    Palette parsed;
-    if (!load_palette_file(source, parsed, error)) {
-        return false;
-    }
+    return load_palette_file_impl(path, palette, error, false, true);
+}
 
-    const auto dir = palette_dir();
+bool validate_import_palette_file(const std::filesystem::path& source, Palette& palette, std::string& error)
+{
+    return load_palette_file_impl(source, palette, error, true, false);
+}
+
+std::optional<Palette> find_import_palette_conflict(const std::filesystem::path& source)
+{
+    const auto destination = import_palette_destination(source);
     std::error_code ec;
-    std::filesystem::create_directories(dir, ec);
-    if (ec) {
-        error = ec.message();
-        return false;
+    if (!std::filesystem::exists(destination, ec)) {
+        return std::nullopt;
     }
 
-    std::filesystem::path normalized_name = source.filename();
-    if (lowercase(normalized_name.extension().string()) != ".hex") {
-        normalized_name.replace_extension(".hex");
+    Palette existing;
+    std::string error;
+    if (!load_palette_file(destination, existing, error)) {
+        existing.name = destination.stem().string();
+        existing.path = destination;
+        existing.colors.clear();
     }
+    return existing;
+}
 
-    auto destination = dir / normalized_name;
+std::string suggest_import_palette_copy_name(const std::filesystem::path& source)
+{
+    const auto destination = import_palette_destination(source);
+    const std::string stem = destination.stem().string();
+    const auto parent = destination.parent_path();
+
+    std::filesystem::path candidate = destination;
     int suffix = 1;
-    while (std::filesystem::exists(destination)) {
-        destination = dir / (normalized_name.stem().string() + "-" + std::to_string(suffix) + ".hex");
+    while (std::filesystem::exists(candidate)) {
+        candidate = parent / (stem + "-" + std::to_string(suffix) + ".hex");
         ++suffix;
     }
+    return candidate.stem().string();
+}
 
-    std::filesystem::copy_file(source, destination, std::filesystem::copy_options::none, ec);
+bool import_palette_file(const std::filesystem::path& source, PaletteImportMode mode, Palette& imported, std::string& error)
+{
+    Palette parsed;
+    if (!validate_import_palette_file(source, parsed, error)) {
+        return false;
+    }
+
+    const auto destination = import_palette_destination(source);
+    std::error_code ec;
+    if (mode == PaletteImportMode::Create && std::filesystem::exists(destination, ec)) {
+        error = parsed.name + " already exists.";
+        return false;
+    }
     if (ec) {
         error = ec.message();
         return false;
     }
 
+    if (!write_palette_file(destination, parsed.colors, error)) {
+        return false;
+    }
     return load_palette_file(destination, imported, error);
 }
 

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Pixelizer VERSION 1.1.0 LANGUAGES C CXX)
+project(Pixelizer VERSION 1.1.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
