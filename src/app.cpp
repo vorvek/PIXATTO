@@ -29,50 +29,36 @@ constexpr std::size_t kMaxHistoryEntries = 100;
 constexpr float kViewportSplitterThickness = 8.0F;
 constexpr float kViewportMinimumPaneSize = 180.0F;
 
-constexpr std::array<SDL_DialogFileFilter, 2> kImageFilters = {{
-    {"Images", "png;jpg;jpeg;bmp"},
-    {"All files", "*"},
-}};
-
-constexpr std::array<SDL_DialogFileFilter, 2> kPaletteFilters = {{
-    {"Lospec palettes", "hex"},
-    {"All files", "*"},
-}};
-
-constexpr std::array<SDL_DialogFileFilter, 1> kPngFilters = {{
-    {"PNG image", "png"},
-}};
-
-const char* dither_label(DitherMode mode)
+TextId dither_label(DitherMode mode)
 {
     switch (mode) {
     case DitherMode::None:
-        return "None";
+        return TextId::None;
     case DitherMode::Bayer:
-        return "Bayer";
+        return TextId::Bayer;
     case DitherMode::BlueNoise:
-        return "Blue Noise";
+        return TextId::BlueNoise;
     case DitherMode::FloydSteinberg:
-        return "Floyd-Steinberg";
+        return TextId::FloydSteinberg;
     case DitherMode::JarvisJudiceNinke:
-        return "Jarvis-Judice-Ninke";
+        return TextId::JarvisJudiceNinke;
     case DitherMode::Atkinson:
-        return "Atkinson";
+        return TextId::Atkinson;
     case DitherMode::Riemersma:
-        return "Riemersma";
+        return TextId::Riemersma;
     }
-    return "None";
+    return TextId::None;
 }
 
-const char* block_mode_label(BlockColorMode mode)
+TextId block_mode_label(BlockColorMode mode)
 {
     switch (mode) {
     case BlockColorMode::Average:
-        return "Average";
+        return TextId::Average;
     case BlockColorMode::WeightedAverage:
-        return "Weighted";
+        return TextId::Weighted;
     }
-    return "Weighted";
+    return TextId::Weighted;
 }
 
 const char* bayer_pattern_label(int size)
@@ -303,6 +289,222 @@ Color32 color_from_rgb_floats(const std::array<float, 3>& color)
     };
 }
 
+ImU32 rgb(unsigned char r, unsigned char g, unsigned char b)
+{
+    return IM_COL32(r, g, b, 255);
+}
+
+void draw_flag_border(ImDrawList* draw_list, ImVec2 min, ImVec2 max)
+{
+    draw_list->AddRect(min, max, IM_COL32(0, 0, 0, 110), 1.5F);
+}
+
+void draw_horizontal_stripes(ImDrawList* draw_list, ImVec2 min, ImVec2 size, std::initializer_list<ImU32> colors)
+{
+    const float stripe_height = size.y / static_cast<float>(colors.size());
+    int index = 0;
+    for (ImU32 color : colors) {
+        const float y0 = min.y + stripe_height * static_cast<float>(index);
+        const float y1 = index + 1 == static_cast<int>(colors.size()) ? min.y + size.y : y0 + stripe_height;
+        draw_list->AddRectFilled(ImVec2(min.x, y0), ImVec2(min.x + size.x, y1), color, 1.5F);
+        ++index;
+    }
+}
+
+void draw_vertical_stripes(ImDrawList* draw_list, ImVec2 min, ImVec2 size, std::initializer_list<ImU32> colors)
+{
+    const float stripe_width = size.x / static_cast<float>(colors.size());
+    int index = 0;
+    for (ImU32 color : colors) {
+        const float x0 = min.x + stripe_width * static_cast<float>(index);
+        const float x1 = index + 1 == static_cast<int>(colors.size()) ? min.x + size.x : x0 + stripe_width;
+        draw_list->AddRectFilled(ImVec2(x0, min.y), ImVec2(x1, min.y + size.y), color, 1.5F);
+        ++index;
+    }
+}
+
+void draw_nordic_cross(ImDrawList* draw_list, ImVec2 min, ImVec2 size, ImU32 base, ImU32 outer, ImU32 inner = 0)
+{
+    const ImVec2 max(min.x + size.x, min.y + size.y);
+    draw_list->AddRectFilled(min, max, base, 1.5F);
+    const float vertical_x = min.x + size.x * 0.38F;
+    const float outer_w = size.x * 0.18F;
+    const float outer_h = size.y * 0.28F;
+    draw_list->AddRectFilled(ImVec2(vertical_x - outer_w * 0.5F, min.y), ImVec2(vertical_x + outer_w * 0.5F, max.y), outer);
+    draw_list->AddRectFilled(ImVec2(min.x, min.y + size.y * 0.5F - outer_h * 0.5F), ImVec2(max.x, min.y + size.y * 0.5F + outer_h * 0.5F), outer);
+    if (inner != 0) {
+        const float inner_w = outer_w * 0.48F;
+        const float inner_h = outer_h * 0.48F;
+        draw_list->AddRectFilled(ImVec2(vertical_x - inner_w * 0.5F, min.y), ImVec2(vertical_x + inner_w * 0.5F, max.y), inner);
+        draw_list->AddRectFilled(ImVec2(min.x, min.y + size.y * 0.5F - inner_h * 0.5F), ImVec2(max.x, min.y + size.y * 0.5F + inner_h * 0.5F), inner);
+    }
+}
+
+void draw_language_flag(Language language, ImVec2 min, ImVec2 size)
+{
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    const ImVec2 max(min.x + size.x, min.y + size.y);
+    const ImU32 white = rgb(255, 255, 255);
+    const ImU32 black = rgb(26, 26, 26);
+    const ImU32 red = rgb(206, 17, 38);
+    const ImU32 yellow = rgb(255, 206, 0);
+
+    switch (language) {
+    case Language::English:
+        draw_list->AddRectFilled(min, max, rgb(1, 33, 105), 1.5F);
+        draw_list->AddLine(min, max, white, 4.0F);
+        draw_list->AddLine(ImVec2(max.x, min.y), ImVec2(min.x, max.y), white, 4.0F);
+        draw_list->AddLine(min, max, red, 2.0F);
+        draw_list->AddLine(ImVec2(max.x, min.y), ImVec2(min.x, max.y), red, 2.0F);
+        draw_list->AddRectFilled(ImVec2(min.x + size.x * 0.42F, min.y), ImVec2(min.x + size.x * 0.58F, max.y), white);
+        draw_list->AddRectFilled(ImVec2(min.x, min.y + size.y * 0.38F), ImVec2(max.x, min.y + size.y * 0.62F), white);
+        draw_list->AddRectFilled(ImVec2(min.x + size.x * 0.46F, min.y), ImVec2(min.x + size.x * 0.54F, max.y), red);
+        draw_list->AddRectFilled(ImVec2(min.x, min.y + size.y * 0.44F), ImVec2(max.x, min.y + size.y * 0.56F), red);
+        break;
+    case Language::Spanish:
+        draw_horizontal_stripes(draw_list, min, size, {red, yellow, red});
+        break;
+    case Language::French:
+        draw_vertical_stripes(draw_list, min, size, {rgb(0, 35, 149), white, red});
+        break;
+    case Language::German:
+        draw_horizontal_stripes(draw_list, min, size, {black, rgb(221, 0, 0), rgb(255, 206, 0)});
+        break;
+    case Language::Danish:
+        draw_nordic_cross(draw_list, min, size, rgb(198, 12, 48), white);
+        break;
+    case Language::Swedish:
+        draw_nordic_cross(draw_list, min, size, rgb(0, 106, 167), rgb(254, 204, 0));
+        break;
+    case Language::Norwegian:
+        draw_nordic_cross(draw_list, min, size, rgb(186, 12, 47), white, rgb(0, 32, 91));
+        break;
+    case Language::Czech:
+        draw_horizontal_stripes(draw_list, min, size, {white, rgb(215, 20, 26)});
+        draw_list->AddTriangleFilled(min, ImVec2(min.x, max.y), ImVec2(min.x + size.x * 0.48F, min.y + size.y * 0.5F), rgb(17, 69, 126));
+        break;
+    case Language::Italian:
+        draw_vertical_stripes(draw_list, min, size, {rgb(0, 146, 70), white, rgb(206, 43, 55)});
+        break;
+    case Language::Greek:
+        for (int i = 0; i < 9; ++i) {
+            const float y0 = min.y + size.y * static_cast<float>(i) / 9.0F;
+            const float y1 = min.y + size.y * static_cast<float>(i + 1) / 9.0F;
+            draw_list->AddRectFilled(ImVec2(min.x, y0), ImVec2(max.x, y1), (i % 2 == 0) ? rgb(13, 94, 175) : white);
+        }
+        draw_list->AddRectFilled(min, ImVec2(min.x + size.y * 0.56F, min.y + size.y * 0.56F), rgb(13, 94, 175));
+        draw_list->AddRectFilled(ImVec2(min.x + size.y * 0.22F, min.y), ImVec2(min.x + size.y * 0.34F, min.y + size.y * 0.56F), white);
+        draw_list->AddRectFilled(ImVec2(min.x, min.y + size.y * 0.22F), ImVec2(min.x + size.y * 0.56F, min.y + size.y * 0.34F), white);
+        break;
+    case Language::Polish:
+        draw_horizontal_stripes(draw_list, min, size, {white, rgb(220, 20, 60)});
+        break;
+    case Language::Finnish:
+        draw_nordic_cross(draw_list, min, size, white, rgb(0, 53, 128));
+        break;
+    case Language::Ukrainian:
+        draw_horizontal_stripes(draw_list, min, size, {rgb(0, 87, 183), rgb(255, 215, 0)});
+        break;
+    case Language::Russian:
+        draw_horizontal_stripes(draw_list, min, size, {white, rgb(0, 57, 166), rgb(213, 43, 30)});
+        break;
+    case Language::ChineseSimplified:
+        draw_list->AddRectFilled(min, max, rgb(222, 41, 16), 1.5F);
+        draw_list->AddCircleFilled(ImVec2(min.x + size.x * 0.25F, min.y + size.y * 0.35F), size.y * 0.18F, rgb(255, 222, 0), 12);
+        break;
+    case Language::ChineseTraditional:
+        draw_list->AddRectFilled(min, max, rgb(254, 0, 0), 1.5F);
+        draw_list->AddRectFilled(min, ImVec2(min.x + size.x * 0.55F, min.y + size.y * 0.52F), rgb(0, 0, 149));
+        draw_list->AddCircleFilled(ImVec2(min.x + size.x * 0.27F, min.y + size.y * 0.26F), size.y * 0.13F, white, 12);
+        break;
+    case Language::Korean:
+        draw_list->AddRectFilled(min, max, white, 1.5F);
+        draw_list->AddCircleFilled(ImVec2(min.x + size.x * 0.5F, min.y + size.y * 0.5F), size.y * 0.18F, rgb(205, 46, 58), 16);
+        draw_list->AddCircleFilled(ImVec2(min.x + size.x * 0.5F, min.y + size.y * 0.58F), size.y * 0.18F, rgb(0, 71, 160), 16);
+        draw_list->AddRectFilled(ImVec2(min.x + size.x * 0.18F, min.y + size.y * 0.22F), ImVec2(min.x + size.x * 0.36F, min.y + size.y * 0.28F), black);
+        draw_list->AddRectFilled(ImVec2(min.x + size.x * 0.64F, min.y + size.y * 0.72F), ImVec2(min.x + size.x * 0.82F, min.y + size.y * 0.78F), black);
+        break;
+    case Language::Japanese:
+        draw_list->AddRectFilled(min, max, white, 1.5F);
+        draw_list->AddCircleFilled(ImVec2(min.x + size.x * 0.5F, min.y + size.y * 0.5F), size.y * 0.24F, rgb(188, 0, 45), 20);
+        break;
+    case Language::Count:
+        draw_list->AddRectFilled(min, max, rgb(80, 80, 80), 1.5F);
+        break;
+    }
+
+    draw_flag_border(draw_list, min, max);
+}
+
+float language_button_width(Language language)
+{
+    const LanguageDefinition& definition = language_definition(language);
+    return ImGui::CalcTextSize(definition.native_name).x + 54.0F;
+}
+
+constexpr float kLanguageOptionRowHeight = 30.0F;
+
+float language_option_width()
+{
+    float widest_name = 0.0F;
+    for (const LanguageDefinition& definition : language_definitions()) {
+        widest_name = std::max(widest_name, ImGui::CalcTextSize(definition.native_name).x);
+    }
+    return widest_name + 48.0F;
+}
+
+bool render_language_button(Language language, float width)
+{
+    const LanguageDefinition& definition = language_definition(language);
+    const bool pressed = ImGui::Button("##LanguageButton", ImVec2(width, 0.0F));
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    const float frame_height = max.y - min.y;
+    const ImVec2 flag_size(24.0F, 16.0F);
+    const ImVec2 flag_min(min.x + 8.0F, min.y + (frame_height - flag_size.y) * 0.5F);
+    draw_language_flag(language, flag_min, flag_size);
+
+    const ImVec2 text_size = ImGui::CalcTextSize(definition.native_name);
+    const ImVec2 text_pos(flag_min.x + flag_size.x + 8.0F, min.y + (frame_height - text_size.y) * 0.5F);
+    ImGui::GetWindowDrawList()->AddText(text_pos, ImGui::GetColorU32(ImGuiCol_Text), definition.native_name);
+    return pressed;
+}
+
+bool render_language_option(Language language, bool selected, float width)
+{
+    const LanguageDefinition& definition = language_definition(language);
+    ImGui::PushID(static_cast<int>(language));
+    const bool pressed = ImGui::Selectable(
+        "##LanguageOption",
+        selected,
+        ImGuiSelectableFlags_None,
+        ImVec2(width, kLanguageOptionRowHeight));
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 flag_size(24.0F, 16.0F);
+    const ImVec2 flag_min(min.x + 8.0F, min.y + (kLanguageOptionRowHeight - flag_size.y) * 0.5F);
+    draw_language_flag(language, flag_min, flag_size);
+
+    const ImVec2 text_size = ImGui::CalcTextSize(definition.native_name);
+    const ImVec2 text_pos(flag_min.x + flag_size.x + 8.0F, min.y + (kLanguageOptionRowHeight - text_size.y) * 0.5F);
+    ImGui::GetWindowDrawList()->AddText(text_pos, ImGui::GetColorU32(ImGuiCol_Text), definition.native_name);
+    ImGui::PopID();
+    return pressed;
+}
+
+bool add_font_from_candidates(const std::vector<std::filesystem::path>& candidates, float size, ImFontConfig* config, const ImWchar* ranges)
+{
+    for (const std::filesystem::path& candidate : candidates) {
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(candidate, ec)) {
+            continue;
+        }
+        if (ImGui::GetIO().Fonts->AddFontFromFileTTF(candidate.string().c_str(), size, config, ranges)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void set_window_icon(SDL_Window* window)
 {
     static constexpr int kIconSourceSize = 16;
@@ -342,6 +544,7 @@ struct App::DialogPayload {
 App::App()
     : dialog_state_(std::make_shared<DialogState>())
 {
+    status_ = text(TextId::StatusOpenImageToBegin);
 }
 
 App::~App()
@@ -352,20 +555,20 @@ App::~App()
 bool App::initialize()
 {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
-        set_status(std::string("SDL_Init failed: ") + SDL_GetError());
+        set_status(textf(TextId::StatusSdlInitFailedFormat, {{"error", SDL_GetError()}}));
         return false;
     }
 
     window_ = SDL_CreateWindow("Pixelizer", kInitialWidth, kInitialHeight, SDL_WINDOW_RESIZABLE);
     if (!window_) {
-        set_status(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
+        set_status(textf(TextId::StatusSdlCreateWindowFailedFormat, {{"error", SDL_GetError()}}));
         return false;
     }
     set_window_icon(window_);
 
     renderer_ = SDL_CreateRenderer(window_, nullptr);
     if (!renderer_) {
-        set_status(std::string("SDL_CreateRenderer failed: ") + SDL_GetError());
+        set_status(textf(TextId::StatusSdlCreateRendererFailedFormat, {{"error", SDL_GetError()}}));
         return false;
     }
     SDL_SetRenderVSync(renderer_, 1);
@@ -382,6 +585,7 @@ bool App::initialize()
     style.ChildRounding = 4.0F;
     style.GrabRounding = 4.0F;
 
+    configure_fonts();
     ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_);
     ImGui_ImplSDLRenderer3_Init(renderer_);
     SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);
@@ -485,6 +689,7 @@ void App::render_frame()
     render_palette_import_name_popup();
     render_palette_color_popup();
     render_save_palette_popup();
+    render_language_picker_popup();
 
     ImGui::Render();
 
@@ -500,58 +705,155 @@ void App::render_menu_bar()
         return;
     }
 
-    if (ImGui::Button("Open Image")) {
+    if (ImGui::Button(imgui_label(TextId::OpenImage, "OpenImage").c_str())) {
         request_open_image();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Import Palette")) {
+    if (ImGui::Button(imgui_label(TextId::ImportPalette, "ImportPalette").c_str())) {
         request_import_palette();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Export PNG")) {
+    if (ImGui::Button(imgui_label(TextId::ExportPng, "ExportPng").c_str())) {
         request_export_png();
     }
     ImGui::SameLine();
     const bool single_viewport = viewport_mode_ == ViewportMode::Single;
-    if (ImGui::Button(single_viewport ? "Two Views" : "One View")) {
+    if (ImGui::Button(imgui_label(single_viewport ? TextId::TwoViews : TextId::OneView, "ViewportMode").c_str())) {
         viewport_mode_ = single_viewport ? ViewportMode::Split : ViewportMode::Single;
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(single_viewport ? "Show original and result viewports." : "Show only the result viewport.");
+        ImGui::SetTooltip("%s", text(single_viewport ? TextId::ShowOriginalAndResult : TextId::ShowOnlyResult));
     }
     if (viewport_mode_ == ViewportMode::Split) {
         ImGui::SameLine();
         const bool side_by_side = viewport_layout_ == ViewportLayout::SideBySide;
-        if (ImGui::Button(side_by_side ? "Stack Views" : "Side by Side")) {
+        if (ImGui::Button(imgui_label(side_by_side ? TextId::StackViews : TextId::SideBySide, "ViewportLayout").c_str())) {
             viewport_layout_ = viewport_layout_ == ViewportLayout::SideBySide ? ViewportLayout::Stacked : ViewportLayout::SideBySide;
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(side_by_side ? "Show result on top and original on bottom." : "Show original left and result right.");
+            ImGui::SetTooltip("%s", text(side_by_side ? TextId::ShowResultTop : TextId::ShowOriginalLeft));
         }
     }
     ImGui::SameLine();
     ImGui::Separator();
     ImGui::SameLine();
-    ImGui::TextUnformatted(status_.c_str());
+
+    const float language_width = language_button_width(language_);
+    const float language_x = std::max(
+        ImGui::GetCursorPosX(),
+        ImGui::GetWindowWidth() - language_width - ImGui::GetStyle().WindowPadding.x);
+    const float status_width = language_x - ImGui::GetCursorPosX() - ImGui::GetStyle().ItemSpacing.x;
+    if (status_width > 24.0F) {
+        const ImVec2 status_min = ImGui::GetCursorScreenPos();
+        const ImVec2 status_max(status_min.x + status_width, status_min.y + ImGui::GetFrameHeight());
+        const ImVec4 clip_rect(status_min.x, status_min.y, status_max.x, status_max.y);
+        ImGui::InvisibleButton("##StatusText", ImVec2(status_width, ImGui::GetFrameHeight()));
+        ImGui::GetWindowDrawList()->AddText(
+            nullptr,
+            0.0F,
+            ImVec2(status_min.x, status_min.y + ImGui::GetStyle().FramePadding.y),
+            ImGui::GetColorU32(ImGuiCol_Text),
+            status_.c_str(),
+            nullptr,
+            0.0F,
+            &clip_rect);
+    }
+
+    ImGui::SameLine();
+    ImGui::SetCursorPosX(language_x);
+    if (render_language_button(language_, language_width)) {
+        open_language_picker_ = true;
+    }
 
     ImGui::EndMainMenuBar();
+}
+
+void App::render_language_picker_popup()
+{
+    const std::string popup_id = imgui_label(TextId::LanguageWindowTitle, "LanguagePicker");
+
+    if (open_language_picker_) {
+        ImGui::OpenPopup(popup_id.c_str());
+        open_language_picker_ = false;
+    }
+
+    const float option_width = language_option_width();
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float side_padding = 24.0F;
+    const float popup_width = std::max(300.0F, option_width * 2.0F + style.ItemSpacing.x + side_padding * 2.0F + 18.0F);
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const float popup_height = std::min(390.0F, std::max(260.0F, viewport->WorkSize.y - 24.0F));
+    ImGui::SetNextWindowSize(ImVec2(popup_width, popup_height), ImGuiCond_Always);
+
+    bool popup_open = true;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(side_padding, style.WindowPadding.y));
+    if (!ImGui::BeginPopupModal(
+            popup_id.c_str(),
+            &popup_open,
+            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+        ImGui::PopStyleVar();
+        return;
+    }
+
+    ImGui::TextUnformatted(text(TextId::ChooseLanguage));
+    ImGui::Separator();
+
+    const auto& languages = language_definitions();
+    constexpr std::size_t kLanguageColumnCount = 2;
+    const std::size_t rows_per_column = (languages.size() + kLanguageColumnCount - 1U) / kLanguageColumnCount;
+    const float list_width = option_width * 2.0F + style.ItemSpacing.x;
+    const float full_list_height = static_cast<float>(rows_per_column) * kLanguageOptionRowHeight;
+    const float close_button_area = ImGui::GetFrameHeightWithSpacing() + style.ItemSpacing.y;
+    const float list_height = std::min(full_list_height, std::max(kLanguageOptionRowHeight * 4.0F, ImGui::GetContentRegionAvail().y - close_button_area));
+
+    ImGui::BeginChild("##LanguageList", ImVec2(list_width, list_height), ImGuiChildFlags_None);
+    for (std::size_t column = 0; column < kLanguageColumnCount; ++column) {
+        if (column > 0) {
+            ImGui::SameLine(0.0F, style.ItemSpacing.x);
+        }
+
+        ImGui::BeginGroup();
+        for (std::size_t row = 0; row < rows_per_column; ++row) {
+            const std::size_t index = row + column * rows_per_column;
+            if (index >= languages.size()) {
+                break;
+            }
+
+            const LanguageDefinition& definition = languages[index];
+            if (render_language_option(definition.language, definition.language == language_, option_width)) {
+                language_ = definition.language;
+                set_status(textf(TextId::StatusLanguageChangedFormat, {{"language", definition.native_name}}));
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::EndGroup();
+    }
+    ImGui::EndChild();
+
+    ImGui::Spacing();
+    if (ImGui::Button(imgui_label(TextId::Close, "CloseLanguagePicker").c_str()) || !popup_open) {
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+    ImGui::PopStyleVar();
 }
 
 void App::render_controls()
 {
     const HistorySnapshot before = capture_history_snapshot();
 
-    ImGui::TextUnformatted("Pixelize");
+    ImGui::TextUnformatted(text(TextId::Pixelize));
     ImGui::Separator();
 
-    if (slider_int_direct("Pixel size", settings_.pixel_size, 1, 128)) {
+    if (slider_int_direct(TextId::PixelSize, "PixelSize", settings_.pixel_size, 1, 128)) {
         mark_dirty();
     }
 
-    if (ImGui::BeginCombo("Block sample", block_mode_label(settings_.block_color_mode))) {
+    if (ImGui::BeginCombo(imgui_label(TextId::BlockSample, "BlockSample").c_str(), text(block_mode_label(settings_.block_color_mode)))) {
         for (BlockColorMode mode : {BlockColorMode::WeightedAverage, BlockColorMode::Average}) {
             const bool selected = settings_.block_color_mode == mode;
-            if (ImGui::Selectable(block_mode_label(mode), selected)) {
+            if (ImGui::Selectable(text(block_mode_label(mode)), selected)) {
                 settings_.block_color_mode = mode;
                 mark_dirty();
             }
@@ -562,7 +864,7 @@ void App::render_controls()
         ImGui::EndCombo();
     }
 
-    if (ImGui::Checkbox("Use palette", &settings_.use_palette)) {
+    if (ImGui::Checkbox(imgui_label(TextId::UsePalette, "UsePalette").c_str(), &settings_.use_palette)) {
         mark_dirty();
     }
 
@@ -578,10 +880,10 @@ void App::render_controls()
 
         const bool has_saved_selection = selected_palette_ >= 0 && selected_palette_ < static_cast<int>(palettes_.size());
         if (palettes_.empty()) {
-            ImGui::TextDisabled("No palettes saved.");
+            ImGui::TextDisabled("%s", text(TextId::NoPalettesSaved));
         } else {
-            const char* preview = has_saved_selection ? palettes_[static_cast<std::size_t>(selected_palette_)].name.c_str() : "Unsaved palette";
-            if (ImGui::BeginCombo("Palette", preview)) {
+            const char* preview = has_saved_selection ? palettes_[static_cast<std::size_t>(selected_palette_)].name.c_str() : text(TextId::UnsavedPalette);
+            if (ImGui::BeginCombo(imgui_label(TextId::Palette, "Palette").c_str(), preview)) {
                 for (int i = 0; i < static_cast<int>(palettes_.size()); ++i) {
                     const bool selected = selected_palette_ == i;
                     if (ImGui::Selectable(palettes_[static_cast<std::size_t>(i)].name.c_str(), selected)) {
@@ -597,7 +899,7 @@ void App::render_controls()
             }
         }
 
-        if (ImGui::Button("New Palette")) {
+        if (ImGui::Button(imgui_label(TextId::NewPalette, "NewPalette").c_str())) {
             request_new_palette();
         }
         ImGui::SameLine();
@@ -606,7 +908,7 @@ void App::render_controls()
         if (!can_save) {
             ImGui::BeginDisabled();
         }
-        if (ImGui::Button("Save")) {
+        if (ImGui::Button(imgui_label(TextId::Save, "SavePalette").c_str())) {
             request_save_palette();
         }
         if (!can_save) {
@@ -618,7 +920,7 @@ void App::render_controls()
         if (!can_save_new) {
             ImGui::BeginDisabled();
         }
-        if (ImGui::Button("Save New")) {
+        if (ImGui::Button(imgui_label(TextId::SaveNew, "SaveNewPalette").c_str())) {
             request_save_palette_as();
         }
         if (!can_save_new) {
@@ -626,15 +928,15 @@ void App::render_controls()
         }
 
         if (has_saved_selection) {
-            if (ImGui::Button("Delete Palette")) {
+            if (ImGui::Button(imgui_label(TextId::DeletePalette, "DeletePalette").c_str())) {
                 request_delete_selected_palette();
             }
         }
 
         ImGui::Spacing();
-        ImGui::Text("%zu / %zu colors", settings_.palette.size(), kMaxPaletteColors);
+        ImGui::Text(text(TextId::PaletteCountFormat), settings_.palette.size(), kMaxPaletteColors);
         if (settings_.palette.empty()) {
-            ImGui::TextDisabled("Add a color to begin.");
+            ImGui::TextDisabled("%s", text(TextId::AddColorToBegin));
         }
 
         const float swatch = 16.0F;
@@ -647,7 +949,8 @@ void App::render_controls()
                 request_edit_palette_color(color_index);
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Edit color %zu", color_index + 1U);
+                const std::string tooltip = textf(TextId::EditColorFormat, {{"index", std::to_string(color_index + 1U)}});
+                ImGui::SetTooltip("%s", tooltip.c_str());
             }
             ImGui::PopID();
             if (ImGui::GetItemRectMax().x + swatch + ImGui::GetStyle().ItemSpacing.x < max_x) {
@@ -660,22 +963,22 @@ void App::render_controls()
                 request_add_palette_color();
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Add color");
+                ImGui::SetTooltip("%s", text(TextId::AddColor));
             }
         }
     } else {
-        if (slider_int_direct("Max colors", settings_.reduction_max_colors, 0, 256)) {
+        if (slider_int_direct(TextId::MaxColors, "MaxColors", settings_.reduction_max_colors, 0, 256)) {
             mark_dirty();
         }
-        if (settings_.reduction_max_colors == 0 && slider_int_direct("Color levels", settings_.color_levels, 2, 64)) {
+        if (settings_.reduction_max_colors == 0 && slider_int_direct(TextId::ColorLevels, "ColorLevels", settings_.color_levels, 2, 64)) {
             mark_dirty();
         }
     }
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Dithering");
+    ImGui::TextUnformatted(text(TextId::Dithering));
     ImGui::Separator();
-    if (ImGui::BeginCombo("Mode", dither_label(settings_.dither_mode))) {
+    if (ImGui::BeginCombo(imgui_label(TextId::Mode, "DitherMode").c_str(), text(dither_label(settings_.dither_mode)))) {
         for (DitherMode mode : {
                  DitherMode::None,
                  DitherMode::Bayer,
@@ -684,9 +987,9 @@ void App::render_controls()
                  DitherMode::JarvisJudiceNinke,
                  DitherMode::Atkinson,
                  DitherMode::Riemersma,
-             }) {
+            }) {
             const bool selected = settings_.dither_mode == mode;
-            if (ImGui::Selectable(dither_label(mode), selected)) {
+            if (ImGui::Selectable(text(dither_label(mode)), selected)) {
                 settings_.dither_mode = mode;
                 mark_dirty();
             }
@@ -698,7 +1001,7 @@ void App::render_controls()
     }
 
     if (settings_.dither_mode == DitherMode::Bayer) {
-        if (ImGui::BeginCombo("Pattern", bayer_pattern_label(settings_.bayer_matrix_size))) {
+        if (ImGui::BeginCombo(imgui_label(TextId::Pattern, "BayerPattern").c_str(), bayer_pattern_label(settings_.bayer_matrix_size))) {
             for (int size : {2, 4, 8, 16}) {
                 const bool selected = settings_.bayer_matrix_size == size;
                 if (ImGui::Selectable(bayer_pattern_label(size), selected)) {
@@ -714,40 +1017,40 @@ void App::render_controls()
     }
 
     float dither_percent = settings_.dither_amount * 100.0F;
-    if (slider_float_direct_value("Amount", dither_percent, 0.0F, 100.0F, "%.0f%%", [this](float value) {
+    if (slider_float_direct_value(TextId::Amount, "DitherAmount", dither_percent, 0.0F, 100.0F, "%.0f%%", [this](float value) {
             settings_.dither_amount = value / 100.0F;
         })) {
         mark_dirty();
     }
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Adjustments");
+    ImGui::TextUnformatted(text(TextId::Adjustments));
     ImGui::Separator();
-    if (slider_float_direct("Brightness", settings_.adjustments.brightness, -1.0F, 1.0F, "%.2f")) {
+    if (slider_float_direct(TextId::Brightness, "Brightness", settings_.adjustments.brightness, -1.0F, 1.0F, "%.2f")) {
         mark_dirty();
     }
-    if (slider_float_direct("Contrast", settings_.adjustments.contrast, -1.0F, 1.0F, "%.2f")) {
+    if (slider_float_direct(TextId::Contrast, "Contrast", settings_.adjustments.contrast, -1.0F, 1.0F, "%.2f")) {
         mark_dirty();
     }
-    if (slider_float_direct("Gamma", settings_.adjustments.gamma, 0.1F, 4.0F, "%.2f")) {
+    if (slider_float_direct(TextId::Gamma, "Gamma", settings_.adjustments.gamma, 0.1F, 4.0F, "%.2f")) {
         mark_dirty();
     }
-    if (slider_float_direct("Saturation", settings_.adjustments.saturation, 0.0F, 2.5F, "%.2f")) {
+    if (slider_float_direct(TextId::Saturation, "Saturation", settings_.adjustments.saturation, 0.0F, 2.5F, "%.2f")) {
         mark_dirty();
     }
-    if (slider_float_direct("Input black", settings_.adjustments.input_black, 0.0F, 0.95F, "%.2f")) {
+    if (slider_float_direct(TextId::InputBlack, "InputBlack", settings_.adjustments.input_black, 0.0F, 0.95F, "%.2f")) {
         settings_.adjustments.input_black = std::min(settings_.adjustments.input_black, settings_.adjustments.input_white - 0.01F);
         mark_dirty();
     }
-    if (slider_float_direct("Input white", settings_.adjustments.input_white, 0.05F, 1.0F, "%.2f")) {
+    if (slider_float_direct(TextId::InputWhite, "InputWhite", settings_.adjustments.input_white, 0.05F, 1.0F, "%.2f")) {
         settings_.adjustments.input_white = std::max(settings_.adjustments.input_white, settings_.adjustments.input_black + 0.01F);
         mark_dirty();
     }
-    if (slider_float_direct("Output black", settings_.adjustments.output_black, 0.0F, 0.95F, "%.2f")) {
+    if (slider_float_direct(TextId::OutputBlack, "OutputBlack", settings_.adjustments.output_black, 0.0F, 0.95F, "%.2f")) {
         settings_.adjustments.output_black = std::min(settings_.adjustments.output_black, settings_.adjustments.output_white - 0.01F);
         mark_dirty();
     }
-    if (slider_float_direct("Output white", settings_.adjustments.output_white, 0.05F, 1.0F, "%.2f")) {
+    if (slider_float_direct(TextId::OutputWhite, "OutputWhite", settings_.adjustments.output_white, 0.05F, 1.0F, "%.2f")) {
         settings_.adjustments.output_white = std::max(settings_.adjustments.output_white, settings_.adjustments.output_black + 0.01F);
         mark_dirty();
     }
@@ -757,18 +1060,18 @@ void App::render_controls()
         settings_.adjustments.tint.g / 255.0F,
         settings_.adjustments.tint.b / 255.0F,
     };
-    if (ImGui::ColorEdit3("Tint", tint, ImGuiColorEditFlags_NoInputs)) {
+    if (ImGui::ColorEdit3(imgui_label(TextId::Tint, "Tint").c_str(), tint, ImGuiColorEditFlags_NoInputs)) {
         settings_.adjustments.tint.r = static_cast<std::uint8_t>(std::lround(std::clamp(tint[0], 0.0F, 1.0F) * 255.0F));
         settings_.adjustments.tint.g = static_cast<std::uint8_t>(std::lround(std::clamp(tint[1], 0.0F, 1.0F) * 255.0F));
         settings_.adjustments.tint.b = static_cast<std::uint8_t>(std::lround(std::clamp(tint[2], 0.0F, 1.0F) * 255.0F));
         mark_dirty();
     }
-    if (slider_float_direct("Tint strength", settings_.adjustments.tint_strength, 0.0F, 1.0F, "%.2f")) {
+    if (slider_float_direct(TextId::TintStrength, "TintStrength", settings_.adjustments.tint_strength, 0.0F, 1.0F, "%.2f")) {
         mark_dirty();
     }
 
     ImGui::Spacing();
-    if (ImGui::Button("Reset Adjustments")) {
+    if (ImGui::Button(imgui_label(TextId::ResetAdjustments, "ResetAdjustments").c_str())) {
         settings_.adjustments = {};
         mark_dirty();
     }
@@ -785,7 +1088,7 @@ void App::render_viewports()
 
     if (viewport_mode_ == ViewportMode::Single) {
         ImGui::BeginChild("ResultPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-        render_image_view("Result", result_texture_, result_zoom_);
+        render_image_view(TextId::Result, "Result", result_texture_, result_zoom_);
         ImGui::EndChild();
         return;
     }
@@ -793,7 +1096,7 @@ void App::render_viewports()
     if (viewport_layout_ == ViewportLayout::SideBySide) {
         if (available.x <= kViewportSplitterThickness * 2.0F) {
             ImGui::BeginChild("OriginalPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-            render_image_view("Original", original_texture_, original_zoom_);
+            render_image_view(TextId::Original, "Original", original_texture_, original_zoom_);
             ImGui::EndChild();
             return;
         }
@@ -804,7 +1107,7 @@ void App::render_viewports()
         viewport_split_ratio_ = ratio_from_split_size(original_width, usable_width);
 
         ImGui::BeginChild("OriginalPane", ImVec2(original_width, 0), ImGuiChildFlags_Borders);
-        render_image_view("Original", original_texture_, original_zoom_);
+        render_image_view(TextId::Original, "Original", original_texture_, original_zoom_);
         ImGui::EndChild();
 
         ImGui::SameLine(0.0F, 0.0F);
@@ -816,12 +1119,12 @@ void App::render_viewports()
 
         ImGui::SameLine(0.0F, 0.0F);
         ImGui::BeginChild("ResultPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-        render_image_view("Result", result_texture_, result_zoom_);
+        render_image_view(TextId::Result, "Result", result_texture_, result_zoom_);
         ImGui::EndChild();
     } else {
         if (available.y <= kViewportSplitterThickness * 2.0F) {
             ImGui::BeginChild("ResultPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-            render_image_view("Result", result_texture_, result_zoom_);
+            render_image_view(TextId::Result, "Result", result_texture_, result_zoom_);
             ImGui::EndChild();
             return;
         }
@@ -832,7 +1135,7 @@ void App::render_viewports()
         viewport_split_ratio_ = ratio_from_split_size(result_height, usable_height);
 
         ImGui::BeginChild("ResultPane", ImVec2(0, result_height), ImGuiChildFlags_Borders);
-        render_image_view("Result", result_texture_, result_zoom_);
+        render_image_view(TextId::Result, "Result", result_texture_, result_zoom_);
         ImGui::EndChild();
 
         remove_vertical_item_spacing();
@@ -844,35 +1147,37 @@ void App::render_viewports()
 
         remove_vertical_item_spacing();
         ImGui::BeginChild("OriginalPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-        render_image_view("Original", original_texture_, original_zoom_);
+        render_image_view(TextId::Original, "Original", original_texture_, original_zoom_);
         ImGui::EndChild();
     }
 }
 
-void App::render_image_view(const char* label, Texture& texture, float& zoom)
+void App::render_image_view(TextId label, const char* id, Texture& texture, float& zoom)
 {
     const ImVec2 pane_available = ImGui::GetContentRegionAvail();
 
-    ImGui::TextUnformatted(label);
+    ImGui::TextUnformatted(text(label));
     ImGui::SameLine();
     ImGui::SetNextItemWidth(180.0F);
-    ImGui::SliderFloat(("Zoom##" + std::string(label)).c_str(), &zoom, 0.05F, 32.0F, "%.2fx", ImGuiSliderFlags_Logarithmic);
+    const std::string zoom_id = std::string("Zoom") + id;
+    ImGui::SliderFloat(imgui_label(TextId::Zoom, zoom_id.c_str()).c_str(), &zoom, 0.05F, 32.0F, "%.2fx", ImGuiSliderFlags_Logarithmic);
     ImGui::SameLine();
-    if (ImGui::SmallButton(("1:1##" + std::string(label)).c_str())) {
+    if (ImGui::SmallButton(("1:1##OneToOne" + std::string(id)).c_str())) {
         zoom = 1.0F;
     }
     ImGui::SameLine();
-    if (ImGui::SmallButton(("Fit##" + std::string(label)).c_str())) {
+    const std::string fit_id = std::string("Fit") + id;
+    if (ImGui::SmallButton(imgui_label(TextId::Fit, fit_id.c_str()).c_str())) {
         zoom = fit_zoom_for_size(texture.width, texture.height, pane_available);
     }
 
     ImGui::Separator();
 
-    ImGui::BeginChild((std::string(label) + "Scroll").c_str(), ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::BeginChild((std::string(id) + "Scroll").c_str(), ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar);
     if (!texture.handle) {
         const ImVec2 avail = ImGui::GetContentRegionAvail();
         ImGui::SetCursorPos(ImVec2(std::max(0.0F, (avail.x - 140.0F) * 0.5F), std::max(0.0F, (avail.y - 20.0F) * 0.5F)));
-        ImGui::TextDisabled("No image loaded");
+        ImGui::TextDisabled("%s", text(TextId::NoImageLoaded));
     } else {
         if (ImGui::IsWindowHovered() && ImGui::GetIO().KeyCtrl && ImGui::GetIO().MouseWheel != 0.0F) {
             zoom = std::clamp(zoom * (ImGui::GetIO().MouseWheel > 0.0F ? 1.12F : 0.89F), 0.05F, 32.0F);
@@ -886,10 +1191,10 @@ void App::render_image_view(const char* label, Texture& texture, float& zoom)
 
 void App::render_number_edit_popup()
 {
-    static constexpr const char* kPopupId = "Set numeric value";
+    const std::string popup_id = imgui_label(TextId::SetNumericValue, "SetNumericValue");
 
     if (number_edit_ && number_edit_->request_open) {
-        ImGui::OpenPopup(kPopupId);
+        ImGui::OpenPopup(popup_id.c_str());
         number_edit_->request_open = false;
     }
 
@@ -899,24 +1204,24 @@ void App::render_number_edit_popup()
 
     bool popup_open = true;
     bool reset_popup = false;
-    if (ImGui::BeginPopupModal(kPopupId, &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextUnformatted(number_edit_->label.c_str());
         ImGui::SetNextItemWidth(220.0F);
 
         const bool submitted = ImGui::InputText(
-            "Value",
+            imgui_label(TextId::Value, "NumericValue").c_str(),
             number_edit_->input.data(),
             number_edit_->input.size(),
             ImGuiInputTextFlags_EnterReturnsTrue);
 
-        const bool apply = submitted || ImGui::Button("Apply");
+        const bool apply = submitted || ImGui::Button(imgui_label(TextId::Apply, "ApplyNumericValue").c_str());
         ImGui::SameLine();
-        const bool cancel = ImGui::Button("Cancel");
+        const bool cancel = ImGui::Button(imgui_label(TextId::Cancel, "CancelNumericValue").c_str());
 
         if (apply) {
             double parsed = 0.0;
             if (!parse_number_edit_input(number_edit_->input.data(), number_edit_->integer, parsed)) {
-                set_status("Invalid value for " + number_edit_->label + ".");
+                set_status(textf(TextId::InvalidValueFormat, {{"label", number_edit_->label}}));
                 ImGui::EndPopup();
                 return;
             }
@@ -927,7 +1232,7 @@ void App::render_number_edit_popup()
             normalize_settings();
             mark_dirty();
             commit_history_change(number_edit_->before);
-            set_status("Set " + number_edit_->label + ".");
+            set_status(textf(TextId::SetValueFormat, {{"label", number_edit_->label}}));
             ImGui::CloseCurrentPopup();
             reset_popup = true;
         } else if (cancel || !popup_open) {
@@ -936,7 +1241,7 @@ void App::render_number_edit_popup()
         }
 
         ImGui::EndPopup();
-    } else if (!ImGui::IsPopupOpen(kPopupId)) {
+    } else if (!ImGui::IsPopupOpen(popup_id.c_str())) {
         reset_popup = true;
     }
 
@@ -947,10 +1252,10 @@ void App::render_number_edit_popup()
 
 void App::render_drop_confirm_popup()
 {
-    static constexpr const char* kPopupId = "Open dropped image?";
+    const std::string popup_id = imgui_label(TextId::OpenDroppedImageTitle, "OpenDroppedImage");
 
     if (open_drop_confirm_) {
-        ImGui::OpenPopup(kPopupId);
+        ImGui::OpenPopup(popup_id.c_str());
         open_drop_confirm_ = false;
     }
 
@@ -960,12 +1265,12 @@ void App::render_drop_confirm_popup()
 
     bool popup_open = true;
     bool reset_popup = false;
-    if (ImGui::BeginPopupModal(kPopupId, &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("Replace the current image with the dropped image?");
+    if (ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted(text(TextId::ReplaceDroppedImage));
         ImGui::Spacing();
         ImGui::TextWrapped("%s", pending_dropped_image_->filename().string().c_str());
 
-        if (ImGui::Button("Open")) {
+        if (ImGui::Button(imgui_label(TextId::Open, "OpenDroppedImageConfirm").c_str())) {
             const auto path = *pending_dropped_image_;
             pending_dropped_image_.reset();
             ImGui::CloseCurrentPopup();
@@ -973,13 +1278,13 @@ void App::render_drop_confirm_popup()
             load_image_from_path(path);
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel") || !popup_open) {
+        if (ImGui::Button(imgui_label(TextId::Cancel, "CancelDroppedImage").c_str()) || !popup_open) {
             ImGui::CloseCurrentPopup();
             reset_popup = true;
         }
 
         ImGui::EndPopup();
-    } else if (!ImGui::IsPopupOpen(kPopupId)) {
+    } else if (!ImGui::IsPopupOpen(popup_id.c_str())) {
         reset_popup = true;
     }
 
@@ -990,10 +1295,10 @@ void App::render_drop_confirm_popup()
 
 void App::render_delete_palette_popup()
 {
-    static constexpr const char* kPopupId = "Delete palette?";
+    const std::string popup_id = imgui_label(TextId::DeletePaletteTitle, "DeletePalettePopup");
 
     if (open_delete_palette_confirm_) {
-        ImGui::OpenPopup(kPopupId);
+        ImGui::OpenPopup(popup_id.c_str());
         open_delete_palette_confirm_ = false;
     }
 
@@ -1003,24 +1308,24 @@ void App::render_delete_palette_popup()
 
     bool popup_open = true;
     bool reset_popup = false;
-    if (ImGui::BeginPopupModal(kPopupId, &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("Delete this saved palette?");
+    if (ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted(text(TextId::DeleteSavedPalette));
         ImGui::Spacing();
         ImGui::TextWrapped("%s", pending_delete_palette_->name.c_str());
 
-        if (ImGui::Button("Delete")) {
+        if (ImGui::Button(imgui_label(TextId::Delete, "DeletePaletteConfirm").c_str())) {
             delete_pending_palette();
             ImGui::CloseCurrentPopup();
             reset_popup = true;
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel") || !popup_open) {
+        if (ImGui::Button(imgui_label(TextId::Cancel, "CancelDeletePalette").c_str()) || !popup_open) {
             ImGui::CloseCurrentPopup();
             reset_popup = true;
         }
 
         ImGui::EndPopup();
-    } else if (!ImGui::IsPopupOpen(kPopupId)) {
+    } else if (!ImGui::IsPopupOpen(popup_id.c_str())) {
         reset_popup = true;
     }
 
@@ -1031,45 +1336,46 @@ void App::render_delete_palette_popup()
 
 void App::render_palette_import_conflict_popup()
 {
-    static constexpr const char* kPopupId = "Palette already exists";
+    const std::string popup_id = imgui_label(TextId::PaletteAlreadyExistsTitle, "PaletteAlreadyExists");
 
-    const bool popup_active = ImGui::IsPopupOpen(kPopupId);
+    const bool popup_active = ImGui::IsPopupOpen(popup_id.c_str());
     if (pending_palette_import_ && pending_palette_import_->request_conflict_open) {
-        ImGui::OpenPopup(kPopupId);
+        ImGui::OpenPopup(popup_id.c_str());
         pending_palette_import_->request_conflict_open = false;
     }
 
     if (!pending_palette_import_
-        || (!pending_palette_import_->request_conflict_open && !popup_active && !ImGui::IsPopupOpen(kPopupId))) {
+        || (!pending_palette_import_->request_conflict_open && !popup_active && !ImGui::IsPopupOpen(popup_id.c_str()))) {
         return;
     }
 
     bool popup_open = true;
     bool reset_popup = false;
-    if (ImGui::BeginPopupModal(kPopupId, &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextWrapped("%s already exists.", pending_palette_import_->parsed.name.c_str());
+    if (ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        const std::string message = textf(TextId::PaletteAlreadyExistsFormat, {{"name", pending_palette_import_->parsed.name}});
+        ImGui::TextWrapped("%s", message.c_str());
 
-        if (ImGui::Button("Overwrite")) {
+        if (ImGui::Button(imgui_label(TextId::Overwrite, "OverwritePalette").c_str())) {
             if (import_pending_palette(PaletteImportMode::Overwrite)) {
                 ImGui::CloseCurrentPopup();
                 reset_popup = true;
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Keep both")) {
+        if (ImGui::Button(imgui_label(TextId::KeepBoth, "KeepBothPalettes").c_str())) {
             const std::string name = suggest_import_palette_copy_name(pending_palette_import_->source);
             std::snprintf(pending_palette_import_->name.data(), pending_palette_import_->name.size(), "%s", name.c_str());
             pending_palette_import_->request_name_open = true;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel") || !popup_open) {
+        if (ImGui::Button(imgui_label(TextId::Cancel, "CancelPaletteConflict").c_str()) || !popup_open) {
             ImGui::CloseCurrentPopup();
             reset_popup = true;
         }
 
         ImGui::EndPopup();
-    } else if (!ImGui::IsPopupOpen(kPopupId) && !pending_palette_import_->request_name_open) {
+    } else if (!ImGui::IsPopupOpen(popup_id.c_str()) && !pending_palette_import_->request_name_open) {
         reset_popup = true;
     }
 
@@ -1080,23 +1386,23 @@ void App::render_palette_import_conflict_popup()
 
 void App::render_palette_import_name_popup()
 {
-    static constexpr const char* kPopupId = "Name imported palette";
+    const std::string popup_id = imgui_label(TextId::NameImportedPaletteTitle, "NameImportedPalette");
 
-    const bool popup_active = ImGui::IsPopupOpen(kPopupId);
+    const bool popup_active = ImGui::IsPopupOpen(popup_id.c_str());
     if (pending_palette_import_ && pending_palette_import_->request_name_open) {
-        ImGui::OpenPopup(kPopupId);
+        ImGui::OpenPopup(popup_id.c_str());
         pending_palette_import_->request_name_open = false;
     }
 
     if (!pending_palette_import_
-        || (!pending_palette_import_->request_name_open && !popup_active && !ImGui::IsPopupOpen(kPopupId))) {
+        || (!pending_palette_import_->request_name_open && !popup_active && !ImGui::IsPopupOpen(popup_id.c_str()))) {
         return;
     }
 
     bool popup_open = true;
     bool reset_popup = false;
-    if (ImGui::BeginPopupModal(kPopupId, &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("Palette name");
+    if (ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted(text(TextId::PaletteName));
         ImGui::SetNextItemWidth(260.0F);
         const bool submitted = ImGui::InputText(
             "##ImportedPaletteName",
@@ -1104,7 +1410,7 @@ void App::render_palette_import_name_popup()
             pending_palette_import_->name.size(),
             ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
 
-        const bool save_clicked = ImGui::Button("Save");
+        const bool save_clicked = ImGui::Button(imgui_label(TextId::Save, "SaveImportedPaletteName").c_str());
         if (submitted || save_clicked) {
             if (save_pending_palette_import_as_name(pending_palette_import_->name.data())) {
                 ImGui::CloseCurrentPopup();
@@ -1112,13 +1418,13 @@ void App::render_palette_import_name_popup()
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel") || !popup_open) {
+        if (ImGui::Button(imgui_label(TextId::Cancel, "CancelImportedPaletteName").c_str()) || !popup_open) {
             ImGui::CloseCurrentPopup();
             reset_popup = true;
         }
 
         ImGui::EndPopup();
-    } else if (!ImGui::IsPopupOpen(kPopupId)) {
+    } else if (!ImGui::IsPopupOpen(popup_id.c_str())) {
         reset_popup = true;
     }
 
@@ -1129,10 +1435,10 @@ void App::render_palette_import_name_popup()
 
 void App::render_palette_color_popup()
 {
-    static constexpr const char* kPopupId = "Palette color";
+    const std::string popup_id = imgui_label(TextId::PaletteColorTitle, "PaletteColor");
 
     if (palette_color_edit_ && palette_color_edit_->request_open) {
-        ImGui::OpenPopup(kPopupId);
+        ImGui::OpenPopup(popup_id.c_str());
         palette_color_edit_->request_open = false;
     }
 
@@ -1142,35 +1448,35 @@ void App::render_palette_color_popup()
 
     bool popup_open = true;
     bool reset_popup = false;
-    if (ImGui::BeginPopupModal(kPopupId, &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted(palette_color_edit_->adding ? "Add palette color" : "Edit palette color");
+    if (ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted(text(palette_color_edit_->adding ? TextId::AddPaletteColor : TextId::EditPaletteColor));
         ImGui::ColorPicker3(
             "##PaletteColorPicker",
             palette_color_edit_->color.data(),
             ImGuiColorEditFlags_DisplayRGB | ImGuiColorEditFlags_InputRGB);
 
         const bool adding = palette_color_edit_->adding;
-        if (ImGui::Button(adding ? "Add" : "Apply")) {
+        if (ImGui::Button(imgui_label(adding ? TextId::Add : TextId::Apply, "ApplyPaletteColor").c_str())) {
             if (adding) {
                 if (settings_.palette.size() >= kMaxPaletteColors) {
-                    set_status("Palette already has 256 colors.");
+                    set_status(text(TextId::StatusPaletteFull));
                 } else {
                     settings_.palette.push_back(color_from_rgb_floats(palette_color_edit_->color));
                     mark_dirty();
                     commit_history_change(palette_color_edit_->before);
-                    set_status("Added palette color.");
+                    set_status(text(TextId::StatusAddedColor));
                     ImGui::CloseCurrentPopup();
                     reset_popup = true;
                 }
             } else {
                 const int index = palette_color_edit_->index;
                 if (index < 0 || index >= static_cast<int>(settings_.palette.size())) {
-                    set_status("Palette color no longer exists.");
+                    set_status(text(TextId::StatusPaletteColorMissing));
                 } else {
                     settings_.palette[static_cast<std::size_t>(index)] = color_from_rgb_floats(palette_color_edit_->color);
                     mark_dirty();
                     commit_history_change(palette_color_edit_->before);
-                    set_status("Updated palette color.");
+                    set_status(text(TextId::StatusUpdatedColor));
                     ImGui::CloseCurrentPopup();
                     reset_popup = true;
                 }
@@ -1184,11 +1490,11 @@ void App::render_palette_color_popup()
         if (!can_delete) {
             ImGui::BeginDisabled();
         }
-        if (ImGui::Button("Delete Color")) {
+        if (ImGui::Button(imgui_label(TextId::DeleteColor, "DeletePaletteColor").c_str())) {
             settings_.palette.erase(settings_.palette.begin() + palette_color_edit_->index);
             mark_dirty();
             commit_history_change(palette_color_edit_->before);
-            set_status("Deleted palette color.");
+            set_status(text(TextId::StatusDeletedColor));
             ImGui::CloseCurrentPopup();
             reset_popup = true;
         }
@@ -1197,13 +1503,13 @@ void App::render_palette_color_popup()
         }
 
         ImGui::SameLine();
-        if (ImGui::Button("Cancel") || !popup_open) {
+        if (ImGui::Button(imgui_label(TextId::Cancel, "CancelPaletteColor").c_str()) || !popup_open) {
             ImGui::CloseCurrentPopup();
             reset_popup = true;
         }
 
         ImGui::EndPopup();
-    } else if (!ImGui::IsPopupOpen(kPopupId)) {
+    } else if (!ImGui::IsPopupOpen(popup_id.c_str())) {
         reset_popup = true;
     }
 
@@ -1214,10 +1520,10 @@ void App::render_palette_color_popup()
 
 void App::render_save_palette_popup()
 {
-    static constexpr const char* kPopupId = "Save palette as";
+    const std::string popup_id = imgui_label(TextId::SavePaletteAsTitle, "SavePaletteAs");
 
     if (palette_save_as_ && palette_save_as_->request_open) {
-        ImGui::OpenPopup(kPopupId);
+        ImGui::OpenPopup(popup_id.c_str());
         palette_save_as_->request_open = false;
     }
 
@@ -1227,8 +1533,8 @@ void App::render_save_palette_popup()
 
     bool popup_open = true;
     bool reset_popup = false;
-    if (ImGui::BeginPopupModal(kPopupId, &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("Palette name");
+    if (ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted(text(TextId::PaletteName));
         ImGui::SetNextItemWidth(260.0F);
         const bool submitted = ImGui::InputText(
             "##PaletteName",
@@ -1236,7 +1542,7 @@ void App::render_save_palette_popup()
             palette_save_as_->name.size(),
             ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
 
-        const bool save_clicked = ImGui::Button("Save");
+        const bool save_clicked = ImGui::Button(imgui_label(TextId::Save, "SavePaletteAsName").c_str());
         if (submitted || save_clicked) {
             if (save_palette_as_name(palette_save_as_->name.data())) {
                 ImGui::CloseCurrentPopup();
@@ -1244,13 +1550,13 @@ void App::render_save_palette_popup()
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel") || !popup_open) {
+        if (ImGui::Button(imgui_label(TextId::Cancel, "CancelSavePaletteAs").c_str()) || !popup_open) {
             ImGui::CloseCurrentPopup();
             reset_popup = true;
         }
 
         ImGui::EndPopup();
-    } else if (!ImGui::IsPopupOpen(kPopupId)) {
+    } else if (!ImGui::IsPopupOpen(popup_id.c_str())) {
         reset_popup = true;
     }
 
@@ -1286,7 +1592,7 @@ void App::update_preview_if_needed()
     preview_dirty_ = false;
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
-    status_ = "Preview updated in " + std::to_string(elapsed) + " ms.";
+    status_ = textf(TextId::StatusPreviewUpdatedFormat, {{"ms", std::to_string(elapsed)}});
 }
 
 void App::rebuild_texture(Texture& texture, const Image& image, bool nearest)
@@ -1301,12 +1607,79 @@ void App::rebuild_texture(Texture& texture, const Image& image, bool nearest)
     texture.height = image.height;
 
     if (!texture.handle) {
-        set_status(std::string("SDL_CreateTexture failed: ") + SDL_GetError());
+        set_status(textf(TextId::StatusSdlCreateTextureFailedFormat, {{"error", SDL_GetError()}}));
         return;
     }
 
     SDL_SetTextureScaleMode(texture.handle, nearest ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR);
     SDL_UpdateTexture(texture.handle, nullptr, image.rgba.data(), image.width * 4);
+}
+
+void App::configure_fonts()
+{
+    ImGuiIO& io = ImGui::GetIO();
+    ImFontGlyphRangesBuilder builder;
+    builder.AddRanges(io.Fonts->GetGlyphRangesDefault());
+
+    for (const LanguageDefinition& definition : language_definitions()) {
+        builder.AddText(definition.native_name);
+        for (std::size_t id = 0; id < kTextCount; ++id) {
+            builder.AddText(translate(definition.language, static_cast<TextId>(id)));
+        }
+    }
+
+    static ImVector<ImWchar> ranges;
+    ranges.clear();
+    builder.BuildRanges(&ranges);
+
+    io.Fonts->Clear();
+    constexpr float kFontSize = 16.0F;
+    const std::vector<std::filesystem::path> base_candidates = {
+        R"(C:\Windows\Fonts\segoeui.ttf)",
+        R"(C:\Windows\Fonts\arial.ttf)",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    };
+
+    const bool loaded_base = add_font_from_candidates(base_candidates, kFontSize, nullptr, ranges.Data);
+    if (!loaded_base) {
+        io.Fonts->AddFontDefault();
+    }
+
+    ImFontConfig merge_config;
+    merge_config.MergeMode = true;
+    merge_config.PixelSnapH = true;
+
+    const std::vector<std::filesystem::path> fallback_candidates = {
+        R"(C:\Windows\Fonts\seguisym.ttf)",
+        R"(C:\Windows\Fonts\msyh.ttc)",
+        R"(C:\Windows\Fonts\msyh.ttf)",
+        R"(C:\Windows\Fonts\msjh.ttc)",
+        R"(C:\Windows\Fonts\YuGothM.ttc)",
+        R"(C:\Windows\Fonts\YuGothR.ttc)",
+        R"(C:\Windows\Fonts\meiryo.ttc)",
+        R"(C:\Windows\Fonts\malgun.ttf)",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
+        "/usr/share/fonts/truetype/unifont/unifont.ttf",
+    };
+
+    for (const std::filesystem::path& candidate : fallback_candidates) {
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(candidate, ec)) {
+            continue;
+        }
+        io.Fonts->AddFontFromFileTTF(candidate.string().c_str(), kFontSize, &merge_config, ranges.Data);
+    }
 }
 
 void App::destroy_texture(Texture& texture)
@@ -1321,20 +1694,34 @@ void App::destroy_texture(Texture& texture)
 
 void App::request_open_image()
 {
+    static std::array<SDL_DialogFileFilter, 2> filters;
+    filters = {{
+        {text(TextId::ImagesFilter), "png;jpg;jpeg;bmp"},
+        {text(TextId::AllFilesFilter), "*"},
+    }};
     auto* payload = new DialogPayload{dialog_state_, DialogKind::OpenImage};
-    SDL_ShowOpenFileDialog(dialog_callback, payload, window_, kImageFilters.data(), static_cast<int>(kImageFilters.size()), nullptr, false);
+    SDL_ShowOpenFileDialog(dialog_callback, payload, window_, filters.data(), static_cast<int>(filters.size()), nullptr, false);
 }
 
 void App::request_import_palette()
 {
+    static std::array<SDL_DialogFileFilter, 2> filters;
+    filters = {{
+        {text(TextId::LospecPalettesFilter), "hex"},
+        {text(TextId::AllFilesFilter), "*"},
+    }};
     auto* payload = new DialogPayload{dialog_state_, DialogKind::ImportPalette};
-    SDL_ShowOpenFileDialog(dialog_callback, payload, window_, kPaletteFilters.data(), static_cast<int>(kPaletteFilters.size()), nullptr, false);
+    SDL_ShowOpenFileDialog(dialog_callback, payload, window_, filters.data(), static_cast<int>(filters.size()), nullptr, false);
 }
 
 void App::request_export_png()
 {
+    static std::array<SDL_DialogFileFilter, 1> filters;
+    filters = {{
+        {text(TextId::PngImageFilter), "png"},
+    }};
     auto* payload = new DialogPayload{dialog_state_, DialogKind::ExportPng};
-    SDL_ShowSaveFileDialog(dialog_callback, payload, window_, kPngFilters.data(), static_cast<int>(kPngFilters.size()), nullptr);
+    SDL_ShowSaveFileDialog(dialog_callback, payload, window_, filters.data(), static_cast<int>(filters.size()), nullptr);
 }
 
 void App::dialog_callback(void* userdata, const char* const* filelist, int)
@@ -1405,7 +1792,7 @@ void App::load_image_from_path(const std::filesystem::path& path)
 {
     ImageLoadResult loaded = load_image_rgba(path.string());
     if (!loaded.error.empty()) {
-        set_status("Image load failed: " + loaded.error);
+        set_status(textf(TextId::StatusImageLoadFailedFormat, {{"error", loaded.error}}));
         return;
     }
 
@@ -1415,7 +1802,7 @@ void App::load_image_from_path(const std::filesystem::path& path)
     original_zoom_ = 1.0F;
     result_zoom_ = 1.0F;
     mark_dirty();
-    set_status("Loaded " + path.filename().string() + ".");
+    set_status(textf(TextId::StatusLoadedFormat, {{"name", path.filename().string()}}));
 }
 
 void App::import_palette_from_path(const std::filesystem::path& path)
@@ -1423,7 +1810,7 @@ void App::import_palette_from_path(const std::filesystem::path& path)
     Palette parsed;
     std::string error;
     if (!validate_import_palette_file(path, parsed, error)) {
-        set_status("Palette import failed: " + error);
+        set_status(textf(TextId::StatusPaletteImportFailedFormat, {{"error", error}}));
         return;
     }
 
@@ -1454,11 +1841,11 @@ bool App::import_pending_palette(PaletteImportMode mode)
     Palette imported;
     std::string error;
     if (!import_palette_file(pending_palette_import_->source, mode, imported, error)) {
-        set_status("Palette import failed: " + error);
+        set_status(textf(TextId::StatusPaletteImportFailedFormat, {{"error", error}}));
         return false;
     }
 
-    finish_palette_import(imported, mode == PaletteImportMode::Overwrite ? "Overwrote" : "Imported");
+    finish_palette_import(imported, mode == PaletteImportMode::Overwrite ? TextId::StatusOverwrotePaletteFormat : TextId::StatusImportedPaletteFormat);
     return true;
 }
 
@@ -1471,15 +1858,15 @@ bool App::save_pending_palette_import_as_name(const std::string& name)
     Palette saved;
     std::string error;
     if (!save_palette_as_new(name, pending_palette_import_->parsed.colors, saved, error)) {
-        set_status("Palette import failed: " + error);
+        set_status(textf(TextId::StatusPaletteImportFailedFormat, {{"error", error}}));
         return false;
     }
 
-    finish_palette_import(saved, "Imported");
+    finish_palette_import(saved, TextId::StatusImportedPaletteFormat);
     return true;
 }
 
-void App::finish_palette_import(const Palette& palette, const std::string& action)
+void App::finish_palette_import(const Palette& palette, TextId message)
 {
     const HistorySnapshot before = capture_history_snapshot();
     refresh_palettes();
@@ -1490,7 +1877,7 @@ void App::finish_palette_import(const Palette& palette, const std::string& actio
     settings_.use_palette = true;
     mark_dirty();
     commit_history_change(before);
-    set_status(action + " palette " + palette.name + ".");
+    set_status(textf(message, {{"name", palette.name}}));
 }
 
 void App::request_new_palette()
@@ -1502,13 +1889,13 @@ void App::request_new_palette()
         Color32{238, 142, 45, 255},
     };
     mark_dirty();
-    set_status("Started a new unsaved palette.");
+    set_status(text(TextId::StatusStartedNewPalette));
 }
 
 void App::request_add_palette_color()
 {
     if (settings_.palette.size() >= kMaxPaletteColors) {
-        set_status("Palette already has 256 colors.");
+        set_status(text(TextId::StatusPaletteFull));
         return;
     }
 
@@ -1526,7 +1913,7 @@ void App::request_add_palette_color()
 void App::request_edit_palette_color(std::size_t index)
 {
     if (index >= settings_.palette.size()) {
-        set_status("Palette color no longer exists.");
+        set_status(text(TextId::StatusPaletteColorMissing));
         return;
     }
 
@@ -1543,26 +1930,26 @@ void App::request_edit_palette_color(std::size_t index)
 void App::request_save_palette()
 {
     if (selected_palette_ < 0 || selected_palette_ >= static_cast<int>(palettes_.size())) {
-        set_status("Use Save New for unsaved palettes.");
+        set_status(text(TextId::StatusUseSaveNew));
         return;
     }
 
     const Palette selected = palettes_[static_cast<std::size_t>(selected_palette_)];
     std::string error;
     if (!overwrite_palette_file(selected, settings_.palette, error)) {
-        set_status("Palette save failed: " + error);
+        set_status(textf(TextId::StatusPaletteSaveFailedFormat, {{"error", error}}));
         return;
     }
 
     refresh_palettes();
     select_palette_by_path(selected.path);
-    set_status("Saved palette " + selected.name + ".");
+    set_status(textf(TextId::StatusSavedPaletteFormat, {{"name", selected.name}}));
 }
 
 void App::request_save_palette_as()
 {
     if (settings_.palette.empty()) {
-        set_status("Add at least one color before saving.");
+        set_status(text(TextId::StatusAddColorBeforeSaving));
         return;
     }
 
@@ -1580,7 +1967,7 @@ void App::request_save_palette_as()
 void App::request_delete_selected_palette()
 {
     if (selected_palette_ < 0 || selected_palette_ >= static_cast<int>(palettes_.size())) {
-        set_status("No palette selected.");
+        set_status(text(TextId::StatusNoPaletteSelected));
         return;
     }
 
@@ -1593,14 +1980,14 @@ bool App::save_palette_as_name(const std::string& name)
     Palette saved;
     std::string error;
     if (!save_palette_as_new(name, settings_.palette, saved, error)) {
-        set_status("Palette save failed: " + error);
+        set_status(textf(TextId::StatusPaletteSaveFailedFormat, {{"error", error}}));
         return false;
     }
 
     refresh_palettes();
     select_palette_by_path(saved.path);
     settings_.use_palette = true;
-    set_status("Saved palette " + saved.name + ".");
+    set_status(textf(TextId::StatusSavedPaletteFormat, {{"name", saved.name}}));
     return true;
 }
 
@@ -1627,31 +2014,31 @@ void App::delete_pending_palette()
     const std::string deleted_name = pending_delete_palette_->name;
     std::string error;
     if (!delete_palette_file(*pending_delete_palette_, error)) {
-        set_status("Palette delete failed: " + error);
+        set_status(textf(TextId::StatusPaletteDeleteFailedFormat, {{"error", error}}));
         return;
     }
 
     refresh_palettes();
     mark_dirty();
-    set_status("Deleted palette " + deleted_name + ".");
+    set_status(textf(TextId::StatusDeletedPaletteFormat, {{"name", deleted_name}}));
 }
 
 void App::export_result_to_path(const std::filesystem::path& path)
 {
     if (result_.empty()) {
-        set_status("Export skipped: no result image yet.");
+        set_status(text(TextId::StatusExportSkipped));
         return;
     }
 
     std::string error;
     const std::string destination = ensure_png_extension(path);
     if (!save_png_rgba(destination, result_, error)) {
-        set_status("Export failed: " + error);
+        set_status(textf(TextId::StatusExportFailedFormat, {{"error", error}}));
         return;
     }
 
     last_export_path_ = destination;
-    set_status("Exported " + std::filesystem::path(destination).filename().string() + ".");
+    set_status(textf(TextId::StatusExportedFormat, {{"name", std::filesystem::path(destination).filename().string()}}));
 }
 
 void App::refresh_palettes()
@@ -1674,6 +2061,26 @@ void App::mark_dirty()
 void App::set_status(std::string message)
 {
     status_ = std::move(message);
+}
+
+const char* App::text(TextId id) const
+{
+    return translate(language_, id);
+}
+
+std::string App::textf(
+    TextId id,
+    std::initializer_list<std::pair<std::string_view, std::string_view>> values) const
+{
+    return format_translation(language_, id, values);
+}
+
+std::string App::imgui_label(TextId label, const char* id) const
+{
+    std::string value = text(label);
+    value += "###";
+    value += id;
+    return value;
 }
 
 void App::normalize_settings()
@@ -1765,7 +2172,7 @@ void App::apply_history_snapshot(const HistorySnapshot& snapshot)
 void App::undo()
 {
     if (!can_undo()) {
-        set_status("Nothing to undo.");
+        set_status(text(TextId::StatusNothingToUndo));
         return;
     }
 
@@ -1773,13 +2180,13 @@ void App::undo()
     const HistorySnapshot snapshot = undo_stack_.back();
     undo_stack_.pop_back();
     apply_history_snapshot(snapshot);
-    set_status("Undid last edit.");
+    set_status(text(TextId::StatusUndid));
 }
 
 void App::redo()
 {
     if (!can_redo()) {
-        set_status("Nothing to redo.");
+        set_status(text(TextId::StatusNothingToRedo));
         return;
     }
 
@@ -1787,7 +2194,7 @@ void App::redo()
     const HistorySnapshot snapshot = redo_stack_.back();
     redo_stack_.pop_back();
     apply_history_snapshot(snapshot);
-    set_status("Redid last edit.");
+    set_status(text(TextId::StatusRedid));
 }
 
 bool App::can_undo() const noexcept
@@ -1800,40 +2207,43 @@ bool App::can_redo() const noexcept
     return !redo_stack_.empty();
 }
 
-bool App::slider_int_direct(const char* label, int& value, int minimum, int maximum)
+bool App::slider_int_direct(TextId label, const char* id, int& value, int minimum, int maximum)
 {
-    const bool changed = ImGui::SliderInt(label, &value, minimum, maximum, "%d", ImGuiSliderFlags_AlwaysClamp);
+    const std::string widget_label = imgui_label(label, id);
+    const bool changed = ImGui::SliderInt(widget_label.c_str(), &value, minimum, maximum, "%d", ImGuiSliderFlags_AlwaysClamp);
     if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
         int* target = &value;
-        open_number_edit(label, value, minimum, maximum, true, "%d", [target, minimum, maximum](double edited) {
+        open_number_edit(text(label), value, minimum, maximum, true, "%d", [target, minimum, maximum](double edited) {
             *target = std::clamp(static_cast<int>(std::lround(edited)), minimum, maximum);
         });
     }
     return changed;
 }
 
-bool App::slider_float_direct(const char* label, float& value, float minimum, float maximum, const char* format)
+bool App::slider_float_direct(TextId label, const char* id, float& value, float minimum, float maximum, const char* format)
 {
-    const bool changed = ImGui::SliderFloat(label, &value, minimum, maximum, format, ImGuiSliderFlags_AlwaysClamp);
+    const std::string widget_label = imgui_label(label, id);
+    const bool changed = ImGui::SliderFloat(widget_label.c_str(), &value, minimum, maximum, format, ImGuiSliderFlags_AlwaysClamp);
     if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
         float* target = &value;
-        open_number_edit(label, value, minimum, maximum, false, format, [target, minimum, maximum](double edited) {
+        open_number_edit(text(label), value, minimum, maximum, false, format, [target, minimum, maximum](double edited) {
             *target = std::clamp(static_cast<float>(edited), minimum, maximum);
         });
     }
     return changed;
 }
 
-bool App::slider_float_direct_value(const char* label, float value, float minimum, float maximum, const char* format, std::function<void(float)> apply)
+bool App::slider_float_direct_value(TextId label, const char* id, float value, float minimum, float maximum, const char* format, std::function<void(float)> apply)
 {
     float editable = value;
-    const bool changed = ImGui::SliderFloat(label, &editable, minimum, maximum, format, ImGuiSliderFlags_AlwaysClamp);
+    const std::string widget_label = imgui_label(label, id);
+    const bool changed = ImGui::SliderFloat(widget_label.c_str(), &editable, minimum, maximum, format, ImGuiSliderFlags_AlwaysClamp);
     if (changed) {
         apply(std::clamp(editable, minimum, maximum));
     }
 
     if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        open_number_edit(label, value, minimum, maximum, false, format, [apply = std::move(apply), minimum, maximum](double edited) {
+        open_number_edit(text(label), value, minimum, maximum, false, format, [apply = std::move(apply), minimum, maximum](double edited) {
             apply(std::clamp(static_cast<float>(edited), minimum, maximum));
         });
     }

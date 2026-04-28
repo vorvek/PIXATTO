@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Pixelizer VERSION 1.1.4 LANGUAGES C CXX)
+project(Pixelizer VERSION 1.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -78,6 +78,7 @@ target_link_libraries(imgui PUBLIC ${PIXELIZER_SDL_TARGET})
 set(PIXELIZER_APP_SOURCES
     src/app.cpp
     src/image_io.cpp
+    src/localization.cpp
     src/main.cpp
     src/palette.cpp
     src/vendor/stb_impl.cpp
@@ -116,7 +117,7 @@ if(MINGW)
 endif()
 
 if(MSVC)
-    target_compile_options(pixelizer PRIVATE /W4 /permissive-)
+    target_compile_options(pixelizer PRIVATE /W4 /permissive- /utf-8)
 else()
     target_compile_options(pixelizer PRIVATE -Wall -Wextra -Wpedantic)
 endif()

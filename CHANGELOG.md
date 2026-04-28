@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 - 2026-04-28
+
+- Added a language picker with flag icons and localized UI labels for European languages, Simplified and Traditional Chinese, Korean, and Japanese.
+- Added Unicode font fallback loading so localized labels can render across Latin, Greek, Cyrillic, CJK, Korean, and Japanese scripts.
+- Kept ImGui widget IDs stable across language changes so controls and popups do not lose state when switching languages.
+
 ## 1.1.4 - 2026-04-28
 
 - Fixed manual numeric entry so clicking Apply parses and uses the typed value before closing the dialog.
