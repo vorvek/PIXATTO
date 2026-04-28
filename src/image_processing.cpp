@@ -549,6 +549,9 @@ Vec3 apply_dither(Vec3 color, int block_x, int block_y, const ProcessSettings& s
         threshold = blue_noise_threshold(block_x, block_y, settings.blue_noise_seed);
     }
 
+    // Ordered dithers use the percentage as threshold amplitude: 100% applies
+    // the full Bayer or blue-noise cell offset before palette/color reduction,
+    // while smaller values fade that ordered pattern toward no offset.
     constexpr float kDitherRange = 0.35F;
     const float offset = threshold * amount * kDitherRange;
     return {
@@ -921,6 +924,10 @@ void write_error_diffusion(
                 color.b - quantized.b,
             };
 
+            // Diffusion dithers use the percentage as error feedback gain:
+            // Floyd-Steinberg and Jarvis-Judice-Ninke reach their full kernels
+            // at 100%, while Atkinson still keeps its classic partial-error
+            // look because the kernel weights intentionally sum below 1.
             for (const DiffusionStep step : steps) {
                 diffuse_error(working, blocks_x, blocks_y, bx + step.dx, by + step.dy, error, amount * step.weight);
             }
@@ -1008,6 +1015,8 @@ void write_riemersma(
         const std::size_t block_index = static_cast<std::size_t>(by) * static_cast<std::size_t>(blocks_x) + static_cast<std::size_t>(bx);
         const BlockColor& block = blocks[block_index];
         Vec3 color = block.srgb;
+        // Riemersma uses the percentage as the strength of the queued Hilbert
+        // curve error history, not as a spatial threshold offset.
         for (int error_index = 0; error_index < kQueueSize; ++error_index) {
             color.r += error_queue[static_cast<std::size_t>(error_index)].r * weights[static_cast<std::size_t>(error_index)] * amount;
             color.g += error_queue[static_cast<std::size_t>(error_index)].g * weights[static_cast<std::size_t>(error_index)] * amount;

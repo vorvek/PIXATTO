@@ -46,6 +46,8 @@ struct ProcessSettings {
     int reduction_max_colors = 0;
     DitherMode dither_mode = DitherMode::None;
     int bayer_matrix_size = 8;
+    // Stored as 0..1, shown as 0..100%. Each dither mode maps this percentage
+    // to its own strength control in image_processing.cpp.
     float dither_amount = 0.0F;
     std::uint32_t blue_noise_seed = 1337;
     Adjustments adjustments;
