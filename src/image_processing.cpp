@@ -13,6 +13,7 @@ namespace {
 constexpr float kEpsilon = 0.000001F;
 constexpr int kBlueNoiseSize = 32;
 constexpr int kBlueNoiseCellCount = kBlueNoiseSize * kBlueNoiseSize;
+constexpr std::size_t kChannelValueCount = 256;
 
 struct Vec3 {
     float r = 0.0F;
@@ -37,6 +38,26 @@ struct BlockColor {
     int area = 0;
 };
 
+struct AdjustmentContext {
+    std::array<float, kChannelValueCount> pre_adjusted = {};
+    std::array<float, kChannelValueCount> linear_r = {};
+    std::array<float, kChannelValueCount> linear_g = {};
+    std::array<float, kChannelValueCount> linear_b = {};
+    Vec3 tint = {1.0F, 1.0F, 1.0F};
+    float tint_strength = 0.0F;
+    float output_black = 0.0F;
+    float output_white = 1.0F;
+    float saturation = 1.0F;
+    bool channel_independent = true;
+};
+
+struct WeightKernel {
+    int width = 0;
+    int height = 0;
+    std::vector<float> weights;
+    double weight_sum = 0.0;
+};
+
 struct QuantPoint {
     std::uint32_t key = 0;
     double weight = 0.0;
@@ -45,6 +66,7 @@ struct QuantPoint {
     double linear_b_sum = 0.0;
     Color32 representative;
     LabColor lab;
+    bool needs_rebuild = false;
 };
 
 struct QuantBox {
@@ -91,11 +113,6 @@ bool has_valid_rgba_size(const Image& image)
     }
 
     return image.rgba.size() == pixels * 4U;
-}
-
-std::size_t rgba_index(const Image& image, int x, int y)
-{
-    return (static_cast<std::size_t>(y) * static_cast<std::size_t>(image.width) + static_cast<std::size_t>(x)) * 4U;
 }
 
 float srgb_to_linear(float value)
@@ -153,21 +170,6 @@ Vec3 from_color32(Color32 color)
     };
 }
 
-Vec3 read_srgb(const Image& image, int x, int y)
-{
-    const std::size_t index = rgba_index(image, x, y);
-    return {
-        from_byte(image.rgba[index + 0U]),
-        from_byte(image.rgba[index + 1U]),
-        from_byte(image.rgba[index + 2U]),
-    };
-}
-
-float read_alpha(const Image& image, int x, int y)
-{
-    return from_byte(image.rgba[rgba_index(image, x, y) + 3U]);
-}
-
 float apply_levels_channel(float value, float input_black, float input_white, float output_black, float output_white)
 {
     const float in_black = clamp01(input_black);
@@ -178,89 +180,146 @@ float apply_levels_channel(float value, float input_black, float input_white, fl
     return out_black + normalized * (out_white - out_black);
 }
 
-Vec3 apply_adjustments(Vec3 color, const Adjustments& adjustments)
+float apply_pre_adjustments_channel(float value, const Adjustments& adjustments)
 {
-    color.r = apply_levels_channel(color.r, adjustments.input_black, adjustments.input_white, 0.0F, 1.0F);
-    color.g = apply_levels_channel(color.g, adjustments.input_black, adjustments.input_white, 0.0F, 1.0F);
-    color.b = apply_levels_channel(color.b, adjustments.input_black, adjustments.input_white, 0.0F, 1.0F);
+    value = apply_levels_channel(value, adjustments.input_black, adjustments.input_white, 0.0F, 1.0F);
 
     const float brightness = std::clamp(adjustments.brightness, -1.0F, 1.0F);
-    color.r = clamp01(color.r + brightness);
-    color.g = clamp01(color.g + brightness);
-    color.b = clamp01(color.b + brightness);
+    value = clamp01(value + brightness);
 
     const float contrast = std::clamp(adjustments.contrast, -1.0F, 1.0F);
     const float contrast_factor = contrast >= 0.0F ? 1.0F + contrast * 2.0F : 1.0F + contrast;
-    color.r = clamp01((color.r - 0.5F) * contrast_factor + 0.5F);
-    color.g = clamp01((color.g - 0.5F) * contrast_factor + 0.5F);
-    color.b = clamp01((color.b - 0.5F) * contrast_factor + 0.5F);
+    value = clamp01((value - 0.5F) * contrast_factor + 0.5F);
 
     const float gamma = std::max(0.05F, adjustments.gamma);
-    color.r = std::pow(color.r, 1.0F / gamma);
-    color.g = std::pow(color.g, 1.0F / gamma);
-    color.b = std::pow(color.b, 1.0F / gamma);
-
-    const float saturation = std::max(0.0F, adjustments.saturation);
-    const float luma = color.r * 0.2126F + color.g * 0.7152F + color.b * 0.0722F;
-    color.r = clamp01(luma + (color.r - luma) * saturation);
-    color.g = clamp01(luma + (color.g - luma) * saturation);
-    color.b = clamp01(luma + (color.b - luma) * saturation);
-
-    const Vec3 tint = from_color32(adjustments.tint);
-    const float tint_strength = clamp01(adjustments.tint_strength);
-    color.r = clamp01(color.r * (1.0F - tint_strength) + (color.r * tint.r) * tint_strength);
-    color.g = clamp01(color.g * (1.0F - tint_strength) + (color.g * tint.g) * tint_strength);
-    color.b = clamp01(color.b * (1.0F - tint_strength) + (color.b * tint.b) * tint_strength);
-
-    color.r = apply_levels_channel(color.r, 0.0F, 1.0F, adjustments.output_black, adjustments.output_white);
-    color.g = apply_levels_channel(color.g, 0.0F, 1.0F, adjustments.output_black, adjustments.output_white);
-    color.b = apply_levels_channel(color.b, 0.0F, 1.0F, adjustments.output_black, adjustments.output_white);
-    return color;
+    return std::pow(value, 1.0F / gamma);
 }
 
-float spatial_weight(int x, int y, int start_x, int start_y, int end_x, int end_y, BlockColorMode mode)
+float apply_tint_and_output_channel(float value, float tint, const AdjustmentContext& context)
 {
-    if (mode == BlockColorMode::Average) {
-        return 1.0F;
+    value = clamp01(value * (1.0F - context.tint_strength) + (value * tint) * context.tint_strength);
+    return apply_levels_channel(value, 0.0F, 1.0F, context.output_black, context.output_white);
+}
+
+AdjustmentContext build_adjustment_context(const Adjustments& adjustments)
+{
+    AdjustmentContext context;
+    context.tint = from_color32(adjustments.tint);
+    context.tint_strength = clamp01(adjustments.tint_strength);
+    context.output_black = clamp01(adjustments.output_black);
+    context.output_white = clamp01(adjustments.output_white);
+    context.saturation = std::max(0.0F, adjustments.saturation);
+    context.channel_independent = context.saturation == 1.0F;
+
+    for (std::size_t index = 0; index < kChannelValueCount; ++index) {
+        const float pre_adjusted = apply_pre_adjustments_channel(from_byte(static_cast<std::uint8_t>(index)), adjustments);
+        context.pre_adjusted[index] = pre_adjusted;
+
+        context.linear_r[index] = srgb_to_linear(apply_tint_and_output_channel(pre_adjusted, context.tint.r, context));
+        context.linear_g[index] = srgb_to_linear(apply_tint_and_output_channel(pre_adjusted, context.tint.g, context));
+        context.linear_b[index] = srgb_to_linear(apply_tint_and_output_channel(pre_adjusted, context.tint.b, context));
     }
 
-    const float width = static_cast<float>(end_x - start_x);
-    const float height = static_cast<float>(end_y - start_y);
-    const float center_x = static_cast<float>(start_x) + (width - 1.0F) * 0.5F;
-    const float center_y = static_cast<float>(start_y) + (height - 1.0F) * 0.5F;
-    const float radius_x = std::max(1.0F, width * 0.5F);
-    const float radius_y = std::max(1.0F, height * 0.5F);
-    const float dx = (static_cast<float>(x) - center_x) / radius_x;
-    const float dy = (static_cast<float>(y) - center_y) / radius_y;
-    return std::exp(-(dx * dx + dy * dy) * 1.15F);
+    return context;
 }
 
-BlockColor choose_block_color(const Image& source, int start_x, int start_y, int end_x, int end_y, const ProcessSettings& settings)
+Vec3 adjusted_linear(std::uint8_t r, std::uint8_t g, std::uint8_t b, const AdjustmentContext& context)
+{
+    if (context.channel_independent) {
+        return {
+            context.linear_r[r],
+            context.linear_g[g],
+            context.linear_b[b],
+        };
+    }
+
+    Vec3 color = {
+        context.pre_adjusted[r],
+        context.pre_adjusted[g],
+        context.pre_adjusted[b],
+    };
+
+    const float luma = color.r * 0.2126F + color.g * 0.7152F + color.b * 0.0722F;
+    color.r = clamp01(luma + (color.r - luma) * context.saturation);
+    color.g = clamp01(luma + (color.g - luma) * context.saturation);
+    color.b = clamp01(luma + (color.b - luma) * context.saturation);
+
+    color.r = apply_tint_and_output_channel(color.r, context.tint.r, context);
+    color.g = apply_tint_and_output_channel(color.g, context.tint.g, context);
+    color.b = apply_tint_and_output_channel(color.b, context.tint.b, context);
+
+    return to_linear(color);
+}
+
+WeightKernel build_weight_kernel(int width, int height, BlockColorMode mode)
+{
+    WeightKernel kernel;
+    kernel.width = width;
+    kernel.height = height;
+    kernel.weights.reserve(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+
+    if (mode == BlockColorMode::Average) {
+        kernel.weights.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 1.0F);
+        kernel.weight_sum = static_cast<double>(width) * static_cast<double>(height);
+        return kernel;
+    }
+
+    const float block_width = static_cast<float>(width);
+    const float block_height = static_cast<float>(height);
+    const float center_x = (block_width - 1.0F) * 0.5F;
+    const float center_y = (block_height - 1.0F) * 0.5F;
+    const float radius_x = std::max(1.0F, block_width * 0.5F);
+    const float radius_y = std::max(1.0F, block_height * 0.5F);
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const float dx = (static_cast<float>(x) - center_x) / radius_x;
+            const float dy = (static_cast<float>(y) - center_y) / radius_y;
+            const float weight = std::exp(-(dx * dx + dy * dy) * 1.15F);
+            kernel.weights.push_back(weight);
+            kernel.weight_sum += weight;
+        }
+    }
+
+    return kernel;
+}
+
+BlockColor choose_block_color(
+    const Image& source,
+    int start_x,
+    int start_y,
+    const WeightKernel& kernel,
+    const AdjustmentContext& adjustments)
 {
     double linear_r_sum = 0.0;
     double linear_g_sum = 0.0;
     double linear_b_sum = 0.0;
     double weighted_alpha = 0.0;
-    double alpha_weight = 0.0;
 
-    for (int y = start_y; y < end_y; ++y) {
-        for (int x = start_x; x < end_x; ++x) {
-            const float alpha = read_alpha(source, x, y);
-            const float weight = spatial_weight(x, y, start_x, start_y, end_x, end_y, settings.block_color_mode);
+    std::size_t weight_index = 0;
+    for (int local_y = 0; local_y < kernel.height; ++local_y) {
+        const std::uint8_t* pixel = source.rgba.data()
+            + (static_cast<std::size_t>(start_y + local_y) * static_cast<std::size_t>(source.width)
+                + static_cast<std::size_t>(start_x))
+                * 4U;
+
+        for (int local_x = 0; local_x < kernel.width; ++local_x) {
+            const float alpha = from_byte(pixel[3U]);
+            const float weight = kernel.weights[weight_index++];
             const double color_weight = static_cast<double>(weight) * static_cast<double>(alpha);
-            const Vec3 linear = to_linear(apply_adjustments(read_srgb(source, x, y), settings.adjustments));
+            const Vec3 linear = adjusted_linear(pixel[0U], pixel[1U], pixel[2U], adjustments);
 
             linear_r_sum += linear.r * color_weight;
             linear_g_sum += linear.g * color_weight;
             linear_b_sum += linear.b * color_weight;
             weighted_alpha += static_cast<double>(alpha) * static_cast<double>(weight);
-            alpha_weight += weight;
+            pixel += 4U;
         }
     }
 
-    const float output_alpha = alpha_weight > 0.0 ? static_cast<float>(weighted_alpha / alpha_weight) : 0.0F;
+    const float output_alpha = kernel.weight_sum > 0.0 ? static_cast<float>(weighted_alpha / kernel.weight_sum) : 0.0F;
     if (weighted_alpha <= kEpsilon) {
-        return {{0.0F, 0.0F, 0.0F}, output_alpha, (end_x - start_x) * (end_y - start_y)};
+        return {{0.0F, 0.0F, 0.0F}, output_alpha, kernel.width * kernel.height};
     }
 
     const Vec3 averaged = to_srgb({
@@ -268,7 +327,7 @@ BlockColor choose_block_color(const Image& source, int start_x, int start_y, int
         static_cast<float>(linear_g_sum / weighted_alpha),
         static_cast<float>(linear_b_sum / weighted_alpha),
     });
-    return {averaged, output_alpha, (end_x - start_x) * (end_y - start_y)};
+    return {averaged, output_alpha, kernel.width * kernel.height};
 }
 
 LabColor to_oklab(Vec3 srgb)
@@ -566,16 +625,24 @@ std::vector<QuantPoint> build_quant_points(const std::vector<BlockColor>& blocks
             merged.linear_r_sum += point.linear_r_sum;
             merged.linear_g_sum += point.linear_g_sum;
             merged.linear_b_sum += point.linear_b_sum;
-            const Vec3 merged_srgb = to_srgb({
-                static_cast<float>(merged.linear_r_sum / merged.weight),
-                static_cast<float>(merged.linear_g_sum / merged.weight),
-                static_cast<float>(merged.linear_b_sum / merged.weight),
-            });
-            merged.representative = to_color32(merged_srgb, 1.0F);
-            merged.lab = to_oklab(merged_srgb);
+            merged.needs_rebuild = true;
         } else {
             aggregated.push_back(point);
         }
+    }
+
+    for (QuantPoint& point : aggregated) {
+        if (!point.needs_rebuild) {
+            continue;
+        }
+
+        const Vec3 merged_srgb = to_srgb({
+            static_cast<float>(point.linear_r_sum / point.weight),
+            static_cast<float>(point.linear_g_sum / point.weight),
+            static_cast<float>(point.linear_b_sum / point.weight),
+        });
+        point.representative = to_color32(merged_srgb, 1.0F);
+        point.lab = to_oklab(merged_srgb);
     }
 
     return aggregated;
@@ -756,12 +823,14 @@ std::vector<Color32> generate_reduced_palette(const std::vector<BlockColor>& blo
 void write_block(Image& result, int start_x, int start_y, int end_x, int end_y, Color32 color)
 {
     for (int y = start_y; y < end_y; ++y) {
+        std::uint8_t* pixel = result.rgba.data()
+            + (static_cast<std::size_t>(y) * static_cast<std::size_t>(result.width) + static_cast<std::size_t>(start_x)) * 4U;
         for (int x = start_x; x < end_x; ++x) {
-            const std::size_t index = rgba_index(result, x, y);
-            result.rgba[index + 0U] = color.r;
-            result.rgba[index + 1U] = color.g;
-            result.rgba[index + 2U] = color.b;
-            result.rgba[index + 3U] = color.a;
+            pixel[0U] = color.r;
+            pixel[1U] = color.g;
+            pixel[2U] = color.b;
+            pixel[3U] = color.a;
+            pixel += 4U;
         }
     }
 }
@@ -983,6 +1052,25 @@ Image process_image(const Image& source, const ProcessSettings& settings)
     const int pixel_size = std::clamp(settings.pixel_size, 1, 256);
     const int blocks_x = (source.width + pixel_size - 1) / pixel_size;
     const int blocks_y = (source.height + pixel_size - 1) / pixel_size;
+    const int edge_width = source.width - (blocks_x - 1) * pixel_size;
+    const int edge_height = source.height - (blocks_y - 1) * pixel_size;
+
+    const AdjustmentContext adjustment_context = build_adjustment_context(settings.adjustments);
+    std::vector<WeightKernel> weight_kernels;
+    weight_kernels.reserve(4U);
+
+    auto kernel_for_block = [&](int bx, int by) -> const WeightKernel& {
+        const int width = (bx == blocks_x - 1) ? edge_width : pixel_size;
+        const int height = (by == blocks_y - 1) ? edge_height : pixel_size;
+        for (const WeightKernel& kernel : weight_kernels) {
+            if (kernel.width == width && kernel.height == height) {
+                return kernel;
+            }
+        }
+
+        weight_kernels.push_back(build_weight_kernel(width, height, settings.block_color_mode));
+        return weight_kernels.back();
+    };
 
     std::vector<BlockColor> blocks;
     blocks.reserve(static_cast<std::size_t>(blocks_x) * static_cast<std::size_t>(blocks_y));
@@ -991,9 +1079,7 @@ Image process_image(const Image& source, const ProcessSettings& settings)
         for (int bx = 0; bx < blocks_x; ++bx) {
             const int start_x = bx * pixel_size;
             const int start_y = by * pixel_size;
-            const int end_x = std::min(start_x + pixel_size, source.width);
-            const int end_y = std::min(start_y + pixel_size, source.height);
-            blocks.push_back(choose_block_color(source, start_x, start_y, end_x, end_y, settings));
+            blocks.push_back(choose_block_color(source, start_x, start_y, kernel_for_block(bx, by), adjustment_context));
         }
     }
 

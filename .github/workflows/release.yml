@@ -57,6 +57,7 @@ jobs:
 
           Copy-Item "build/ninja-release/pixelizer.exe" $packageDir
           Copy-Item "README.md" $packageDir
+          Copy-Item "CHANGELOG.md" $packageDir
           Copy-Item "THIRD_PARTY.md" $packageDir
           Copy-Item "LICENSE" $packageDir
           Copy-Item "assets" $packageDir -Recurse
@@ -124,7 +125,7 @@ jobs:
           mkdir -p "$package_dir"
 
           cp build/ninja-release/pixelizer "$package_dir/"
-          cp README.md THIRD_PARTY.md LICENSE "$package_dir/"
+          cp README.md CHANGELOG.md THIRD_PARTY.md LICENSE "$package_dir/"
           cp -R assets "$package_dir/"
           strip "$package_dir/pixelizer" || true
 
@@ -162,7 +163,7 @@ jobs:
           mkdir -p "$package_dir"
 
           cp build/ninja-release/pixelizer "$package_dir/"
-          cp README.md THIRD_PARTY.md LICENSE "$package_dir/"
+          cp README.md CHANGELOG.md THIRD_PARTY.md LICENSE "$package_dir/"
           cp -R assets "$package_dir/"
           strip "$package_dir/pixelizer" || true
 

@@ -25,7 +25,7 @@ Pixelizer is a desktop image tool for turning PNG, JPG, and BMP files into pseud
 
 ## Downloads
 
-Tagged releases are built by GitHub Actions and published on the [Releases page](https://github.com/vorvek/Pixelizer/releases) with Windows x64, Linux x64, and macOS assets. Each package contains the executable plus the project readme and third-party license notes.
+Tagged releases are built by GitHub Actions and published on the [Releases page](https://github.com/vorvek/Pixelizer/releases) with Windows x64, Linux x64, and macOS assets. Each package contains the executable plus the project readme, changelog, and third-party license notes.
 
 ## Build From Source
 
