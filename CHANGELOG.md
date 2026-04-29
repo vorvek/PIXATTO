@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.2 - 2026-04-29
+
+- Added a localized About dialog with project, MIT license, dependency, palette, and asset credits.
+
 ## 1.2.1 - 2026-04-28
 
 - Added 21 bundled Lospec `.hex` palettes, seeded as normal saved palettes on first launch so they can still be deleted.

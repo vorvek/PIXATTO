@@ -104,6 +104,7 @@ private:
     void render_frame();
     void render_menu_bar();
     void render_language_picker_popup();
+    void render_about_dialog();
     void render_controls();
     void render_viewports();
     void render_image_view(TextId label, const char* id, Texture& texture, float& zoom);
@@ -181,6 +182,7 @@ private:
     ViewportLayout viewport_layout_ = ViewportLayout::SideBySide;
     Language language_ = Language::English;
     bool open_language_picker_ = false;
+    bool open_about_dialog_ = false;
     bool running_ = false;
     std::string status_;
     std::filesystem::path current_image_path_;

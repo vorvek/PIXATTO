@@ -28,6 +28,29 @@ constexpr int kInitialHeight = 900;
 constexpr std::size_t kMaxHistoryEntries = 100;
 constexpr float kViewportSplitterThickness = 8.0F;
 constexpr float kViewportMinimumPaneSize = 180.0F;
+constexpr const char* kLospecPaletteCredits[] = {
+    "pico-8",
+    "dawnbringer-16",
+    "dawnbringer-32",
+    "shmupy-16",
+    "aurora",
+    "db-iso22",
+    "amiga-pixels-64",
+    "2bit-demichrome",
+    "windows-95-256-colours",
+    "microsoft-windows",
+    "commodore64",
+    "commodore-vic-20",
+    "msx",
+    "amstrad-cpc",
+    "cga-palette-1-high",
+    "cga-palette-0-high",
+    "cga-palette-2-high",
+    "cga-palette-1-low",
+    "cga-palette-0-low",
+    "cga-palette-2-low",
+    "apple-ii",
+};
 
 TextId dither_label(DitherMode mode)
 {
@@ -690,6 +713,7 @@ void App::render_frame()
     render_palette_color_popup();
     render_save_palette_popup();
     render_language_picker_popup();
+    render_about_dialog();
 
     ImGui::Render();
 
@@ -738,11 +762,16 @@ void App::render_menu_bar()
     ImGui::Separator();
     ImGui::SameLine();
 
+    const ImGuiStyle& style = ImGui::GetStyle();
     const float language_width = language_button_width(language_);
-    const float language_x = std::max(
+    const float about_width = std::max(
+        ImGui::GetFrameHeight(),
+        ImGui::CalcTextSize(text(TextId::AboutButtonLabel)).x + style.FramePadding.x * 2.0F);
+    const float right_controls_width = language_width + style.ItemSpacing.x + about_width;
+    const float right_controls_x = std::max(
         ImGui::GetCursorPosX(),
-        ImGui::GetWindowWidth() - language_width - ImGui::GetStyle().WindowPadding.x);
-    const float status_width = language_x - ImGui::GetCursorPosX() - ImGui::GetStyle().ItemSpacing.x;
+        ImGui::GetWindowWidth() - right_controls_width - style.WindowPadding.x);
+    const float status_width = right_controls_x - ImGui::GetCursorPosX() - style.ItemSpacing.x;
     if (status_width > 24.0F) {
         const ImVec2 status_min = ImGui::GetCursorScreenPos();
         const ImVec2 status_max(status_min.x + status_width, status_min.y + ImGui::GetFrameHeight());
@@ -760,9 +789,16 @@ void App::render_menu_bar()
     }
 
     ImGui::SameLine();
-    ImGui::SetCursorPosX(language_x);
+    ImGui::SetCursorPosX(right_controls_x);
     if (render_language_button(language_, language_width)) {
         open_language_picker_ = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(imgui_label(TextId::AboutButtonLabel, "AboutButton").c_str(), ImVec2(about_width, 0.0F))) {
+        open_about_dialog_ = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", text(TextId::AboutButtonTooltip));
     }
 
     ImGui::EndMainMenuBar();
@@ -837,6 +873,67 @@ void App::render_language_picker_popup()
 
     ImGui::EndPopup();
     ImGui::PopStyleVar();
+}
+
+void App::render_about_dialog()
+{
+    const std::string popup_id = imgui_label(TextId::AboutWindowTitle, "AboutDialog");
+
+    if (open_about_dialog_) {
+        ImGui::OpenPopup(popup_id.c_str());
+        open_about_dialog_ = false;
+    }
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const float popup_width = std::min(620.0F, std::max(340.0F, viewport->WorkSize.x - 32.0F));
+    const float popup_height = std::min(560.0F, std::max(360.0F, viewport->WorkSize.y - 32.0F));
+    ImGui::SetNextWindowSize(ImVec2(popup_width, popup_height), ImGuiCond_Appearing);
+
+    bool popup_open = true;
+    if (!ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_NoSavedSettings)) {
+        return;
+    }
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float close_button_area = ImGui::GetFrameHeightWithSpacing() + style.ItemSpacing.y;
+    const float content_height = std::max(180.0F, ImGui::GetContentRegionAvail().y - close_button_area);
+    auto wrapped_bullet = [](const char* value) {
+        ImGui::Bullet();
+        ImGui::SameLine();
+        ImGui::TextWrapped("%s", value);
+    };
+
+    ImGui::BeginChild("##AboutContent", ImVec2(0.0F, content_height), ImGuiChildFlags_None);
+    ImGui::TextUnformatted("Pixelizer");
+    ImGui::Separator();
+    ImGui::TextWrapped("%s", text(TextId::AboutProjectCredit));
+    ImGui::TextWrapped("%s", text(TextId::AboutProjectLicense));
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted(text(TextId::AboutThirdPartyTitle));
+    ImGui::Separator();
+    ImGui::TextUnformatted(text(TextId::AboutDependenciesTitle));
+    wrapped_bullet(text(TextId::AboutDependencySdl));
+    wrapped_bullet(text(TextId::AboutDependencyImGui));
+    wrapped_bullet(text(TextId::AboutDependencyStb));
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted(text(TextId::AboutPalettesTitle));
+    ImGui::TextWrapped("%s", text(TextId::AboutPalettesCredit));
+    for (const char* palette : kLospecPaletteCredits) {
+        wrapped_bullet(palette);
+    }
+
+    ImGui::Spacing();
+    ImGui::TextWrapped("%s", text(TextId::AboutAssetsCredit));
+    ImGui::EndChild();
+
+    ImGui::Spacing();
+    if (ImGui::Button(imgui_label(TextId::Close, "CloseAboutDialog").c_str()) || !popup_open) {
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
 }
 
 void App::render_controls()
