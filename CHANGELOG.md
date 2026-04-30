@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4.0 - 2026-04-30
+
+- Reworked preview processing for very small pixel sizes, especially `1x` and `2x`, to avoid building and rereading a full block grid when each block can be written directly.
+- Added a direct `1x` path that uses precomputed per-channel reduction tables for the common no-palette/no-diffusion preview case.
+- Parallelized large direct block renders across block rows, capped to a small worker count so bigger images update faster without overwhelming the UI.
+- Cached the small set of block weight kernels up front and added a uniform-kernel shortcut, reducing inner-loop work for tiny weighted blocks such as `2x2`.
+- Optimized Riemersma dithering by replacing the 16-entry per-pixel error-history scan with an equivalent rolling weighted error.
+- Added a cached 6-bit palette lookup for large-palette diffusion modes so repeated previews with a 256-color palette avoid scanning every palette entry for every pixel.
+- Improved the worst-case `1672x941`, `1x`, 256-color palette, 50% Riemersma path from roughly `690 ms` in the UI to around `170 ms` in the core processing benchmark after the palette lookup is warm.
+- Added image-processing regression tests for the new fast paths, transparency behavior, palette-constrained Riemersma output, and `1x` equivalence with the block path.
+
 ## 1.3.1 - 2026-04-30
 
 - Made native file picker dialogs behave modally in the app by disabling controls, drops, and shortcuts until the picker closes.

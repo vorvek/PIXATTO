@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 namespace pixelizer {
@@ -15,6 +17,11 @@ constexpr float kTransparencyThreshold = 0.5F;
 constexpr int kBlueNoiseSize = 32;
 constexpr int kBlueNoiseCellCount = kBlueNoiseSize * kBlueNoiseSize;
 constexpr std::size_t kChannelValueCount = 256;
+constexpr int kPaletteLookupBits = 6;
+constexpr int kPaletteLookupChannelCount = 1 << kPaletteLookupBits;
+constexpr int kPaletteLookupShift = 8 - kPaletteLookupBits;
+constexpr std::size_t kPaletteLookupCellCount = 1U << (kPaletteLookupBits * 3);
+constexpr std::size_t kPaletteLookupMinColors = 32;
 
 struct Vec3 {
     float r = 0.0F;
@@ -33,6 +40,11 @@ struct PaletteEntry {
     LabColor lab;
 };
 
+struct PaletteMatcher {
+    std::vector<PaletteEntry> entries;
+    std::vector<Color32> lookup;
+};
+
 struct BlockColor {
     Vec3 srgb;
     float alpha = 1.0F;
@@ -44,6 +56,9 @@ struct AdjustmentContext {
     std::array<float, kChannelValueCount> linear_r = {};
     std::array<float, kChannelValueCount> linear_g = {};
     std::array<float, kChannelValueCount> linear_b = {};
+    std::array<float, kChannelValueCount> srgb_r = {};
+    std::array<float, kChannelValueCount> srgb_g = {};
+    std::array<float, kChannelValueCount> srgb_b = {};
     Vec3 tint = {1.0F, 1.0F, 1.0F};
     float tint_strength = 0.0F;
     float output_black = 0.0F;
@@ -57,6 +72,7 @@ struct WeightKernel {
     int height = 0;
     std::vector<float> weights;
     double weight_sum = 0.0;
+    bool uniform = false;
 };
 
 struct QuantPoint {
@@ -229,6 +245,10 @@ AdjustmentContext build_adjustment_context(const Adjustments& adjustments)
         context.linear_r[index] = srgb_to_linear(apply_tint_and_output_channel(pre_adjusted, context.tint.r, context));
         context.linear_g[index] = srgb_to_linear(apply_tint_and_output_channel(pre_adjusted, context.tint.g, context));
         context.linear_b[index] = srgb_to_linear(apply_tint_and_output_channel(pre_adjusted, context.tint.b, context));
+
+        context.srgb_r[index] = linear_to_srgb(context.linear_r[index]);
+        context.srgb_g[index] = linear_to_srgb(context.linear_g[index]);
+        context.srgb_b[index] = linear_to_srgb(context.linear_b[index]);
     }
 
     return context;
@@ -272,6 +292,7 @@ WeightKernel build_weight_kernel(int width, int height, BlockColorMode mode)
     if (mode == BlockColorMode::Average) {
         kernel.weights.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 1.0F);
         kernel.weight_sum = static_cast<double>(width) * static_cast<double>(height);
+        kernel.uniform = true;
         return kernel;
     }
 
@@ -292,7 +313,41 @@ WeightKernel build_weight_kernel(int width, int height, BlockColorMode mode)
         }
     }
 
+    kernel.uniform = std::all_of(kernel.weights.begin(), kernel.weights.end(), [&](float weight) {
+        return std::abs(weight - kernel.weights.front()) <= kEpsilon;
+    });
     return kernel;
+}
+
+std::vector<WeightKernel> build_weight_kernel_cache(int pixel_size, int edge_width, int edge_height, BlockColorMode mode)
+{
+    std::vector<WeightKernel> kernels;
+    kernels.reserve(4U);
+
+    auto add_unique = [&](int width, int height) {
+        for (const WeightKernel& kernel : kernels) {
+            if (kernel.width == width && kernel.height == height) {
+                return;
+            }
+        }
+        kernels.push_back(build_weight_kernel(width, height, mode));
+    };
+
+    add_unique(pixel_size, pixel_size);
+    add_unique(edge_width, pixel_size);
+    add_unique(pixel_size, edge_height);
+    add_unique(edge_width, edge_height);
+    return kernels;
+}
+
+const WeightKernel& find_weight_kernel(const std::vector<WeightKernel>& kernels, int width, int height)
+{
+    for (const WeightKernel& kernel : kernels) {
+        if (kernel.width == width && kernel.height == height) {
+            return kernel;
+        }
+    }
+    return kernels.front();
 }
 
 BlockColor choose_block_color(
@@ -302,6 +357,44 @@ BlockColor choose_block_color(
     const WeightKernel& kernel,
     const AdjustmentContext& adjustments)
 {
+    if (kernel.uniform) {
+        double linear_r_sum = 0.0;
+        double linear_g_sum = 0.0;
+        double linear_b_sum = 0.0;
+        double alpha_sum = 0.0;
+
+        for (int local_y = 0; local_y < kernel.height; ++local_y) {
+            const std::uint8_t* pixel = source.rgba.data()
+                + (static_cast<std::size_t>(start_y + local_y) * static_cast<std::size_t>(source.width)
+                    + static_cast<std::size_t>(start_x))
+                    * 4U;
+
+            for (int local_x = 0; local_x < kernel.width; ++local_x) {
+                const float alpha = from_byte(pixel[3U]);
+                const Vec3 linear = adjusted_linear(pixel[0U], pixel[1U], pixel[2U], adjustments);
+
+                linear_r_sum += linear.r * static_cast<double>(alpha);
+                linear_g_sum += linear.g * static_cast<double>(alpha);
+                linear_b_sum += linear.b * static_cast<double>(alpha);
+                alpha_sum += static_cast<double>(alpha);
+                pixel += 4U;
+            }
+        }
+
+        const int area = kernel.width * kernel.height;
+        const float output_alpha = area > 0 ? static_cast<float>(alpha_sum / static_cast<double>(area)) : 0.0F;
+        if (alpha_sum <= kEpsilon) {
+            return {{0.0F, 0.0F, 0.0F}, output_alpha, area};
+        }
+
+        const Vec3 averaged = to_srgb({
+            static_cast<float>(linear_r_sum / alpha_sum),
+            static_cast<float>(linear_g_sum / alpha_sum),
+            static_cast<float>(linear_b_sum / alpha_sum),
+        });
+        return {averaged, output_alpha, area};
+    }
+
     double linear_r_sum = 0.0;
     double linear_g_sum = 0.0;
     double linear_b_sum = 0.0;
@@ -341,6 +434,24 @@ BlockColor choose_block_color(
     return {averaged, output_alpha, kernel.width * kernel.height};
 }
 
+BlockColor choose_single_pixel_color(const std::uint8_t* pixel, const AdjustmentContext& adjustments)
+{
+    const float alpha = from_byte(pixel[3U]);
+    if (alpha <= kEpsilon) {
+        return {{0.0F, 0.0F, 0.0F}, alpha, 1};
+    }
+
+    if (adjustments.channel_independent) {
+        return {{
+            adjustments.srgb_r[pixel[0U]],
+            adjustments.srgb_g[pixel[1U]],
+            adjustments.srgb_b[pixel[2U]],
+        }, alpha, 1};
+    }
+
+    return {to_srgb(adjusted_linear(pixel[0U], pixel[1U], pixel[2U], adjustments)), alpha, 1};
+}
+
 LabColor to_oklab(Vec3 srgb)
 {
     const Vec3 linear = to_linear(srgb);
@@ -378,13 +489,8 @@ std::vector<PaletteEntry> build_palette_entries(const std::vector<Color32>& pale
     return entries;
 }
 
-Color32 nearest_palette_color(Vec3 color, const std::vector<PaletteEntry>& palette, float alpha)
+Color32 nearest_palette_entry(LabColor target, const std::vector<PaletteEntry>& palette)
 {
-    if (palette.empty()) {
-        return to_color32(color, alpha);
-    }
-
-    const LabColor target = to_oklab(color);
     float best_distance = std::numeric_limits<float>::max();
     Color32 best = palette.front().color;
 
@@ -394,6 +500,91 @@ Color32 nearest_palette_color(Vec3 color, const std::vector<PaletteEntry>& palet
             best_distance = distance;
             best = candidate.color;
         }
+    }
+
+    return best;
+}
+
+std::size_t palette_lookup_index(std::uint8_t r, std::uint8_t g, std::uint8_t b)
+{
+    const std::size_t red = static_cast<std::size_t>(r >> kPaletteLookupShift);
+    const std::size_t green = static_cast<std::size_t>(g >> kPaletteLookupShift);
+    const std::size_t blue = static_cast<std::size_t>(b >> kPaletteLookupShift);
+    return (red << (kPaletteLookupBits * 2)) | (green << kPaletteLookupBits) | blue;
+}
+
+std::uint8_t palette_lookup_representative_byte(int value)
+{
+    return static_cast<std::uint8_t>(
+        (value * 255 + (kPaletteLookupChannelCount - 1) / 2) / (kPaletteLookupChannelCount - 1));
+}
+
+std::vector<Color32> build_palette_lookup(const std::vector<PaletteEntry>& entries)
+{
+    std::vector<Color32> lookup(kPaletteLookupCellCount);
+
+    for (int r = 0; r < kPaletteLookupChannelCount; ++r) {
+        for (int g = 0; g < kPaletteLookupChannelCount; ++g) {
+            for (int b = 0; b < kPaletteLookupChannelCount; ++b) {
+                const Color32 representative = {
+                    palette_lookup_representative_byte(r),
+                    palette_lookup_representative_byte(g),
+                    palette_lookup_representative_byte(b),
+                    255,
+                };
+                lookup[palette_lookup_index(representative.r, representative.g, representative.b)] =
+                    nearest_palette_entry(to_oklab(from_color32(representative)), entries);
+            }
+        }
+    }
+
+    return lookup;
+}
+
+std::vector<Color32> cached_palette_lookup(
+    const std::vector<Color32>& palette,
+    const std::vector<PaletteEntry>& entries)
+{
+    static std::mutex cache_mutex;
+    static std::vector<Color32> cached_palette;
+    static std::vector<Color32> cached_lookup;
+
+    {
+        const std::lock_guard lock(cache_mutex);
+        if (!cached_lookup.empty() && cached_palette == palette) {
+            return cached_lookup;
+        }
+    }
+
+    std::vector<Color32> lookup = build_palette_lookup(entries);
+
+    const std::lock_guard lock(cache_mutex);
+    cached_palette = palette;
+    cached_lookup = std::move(lookup);
+    return cached_lookup;
+}
+
+PaletteMatcher build_palette_matcher(const std::vector<Color32>& palette, bool enable_lookup)
+{
+    PaletteMatcher matcher;
+    matcher.entries = build_palette_entries(palette);
+    if (enable_lookup && matcher.entries.size() >= kPaletteLookupMinColors) {
+        matcher.lookup = cached_palette_lookup(palette, matcher.entries);
+    }
+    return matcher;
+}
+
+Color32 nearest_palette_color(Vec3 color, const PaletteMatcher& palette, float alpha)
+{
+    if (palette.entries.empty()) {
+        return to_color32(color, alpha);
+    }
+
+    Color32 best;
+    if (!palette.lookup.empty()) {
+        best = palette.lookup[palette_lookup_index(to_byte(color.r), to_byte(color.g), to_byte(color.b))];
+    } else {
+        best = nearest_palette_entry(to_oklab(color), palette.entries);
     }
 
     best.a = to_byte(alpha);
@@ -582,7 +773,7 @@ Color32 reduce_color(Vec3 color, int levels, float alpha)
     return to_color32(color, alpha);
 }
 
-Color32 quantize_color(Vec3 color, float alpha, const std::vector<PaletteEntry>& palette_entries, const ProcessSettings& settings)
+Color32 quantize_color(Vec3 color, float alpha, const PaletteMatcher& palette, const ProcessSettings& settings)
 {
     if (should_write_transparent(alpha, settings)) {
         return transparent_color();
@@ -592,8 +783,8 @@ Color32 quantize_color(Vec3 color, float alpha, const std::vector<PaletteEntry>&
     color.g = clamp01(color.g);
     color.b = clamp01(color.b);
 
-    return !palette_entries.empty()
-        ? nearest_palette_color(color, palette_entries, 1.0F)
+    return !palette.entries.empty()
+        ? nearest_palette_color(color, palette, 1.0F)
         : reduce_color(color, settings.color_levels, 1.0F);
 }
 
@@ -853,6 +1044,201 @@ void write_block(Image& result, int start_x, int start_y, int end_x, int end_y, 
     }
 }
 
+void write_pixel(std::uint8_t* pixel, Color32 color)
+{
+    pixel[0U] = color.r;
+    pixel[1U] = color.g;
+    pixel[2U] = color.b;
+    pixel[3U] = color.a;
+}
+
+std::array<std::uint8_t, kChannelValueCount> build_reduction_table(
+    const std::array<float, kChannelValueCount>& values,
+    int levels)
+{
+    std::array<std::uint8_t, kChannelValueCount> table = {};
+    levels = std::clamp(levels, 2, 64);
+    const float max_level = static_cast<float>(levels - 1);
+
+    for (std::size_t index = 0; index < table.size(); ++index) {
+        const float reduced = std::round(clamp01(values[index]) * max_level) / max_level;
+        table[index] = to_byte(reduced);
+    }
+
+    return table;
+}
+
+void write_unpixelized_reduced_fast(
+    Image& result,
+    const Image& source,
+    const AdjustmentContext& adjustments,
+    const ProcessSettings& settings)
+{
+    const std::array<std::uint8_t, kChannelValueCount> red = build_reduction_table(adjustments.srgb_r, settings.color_levels);
+    const std::array<std::uint8_t, kChannelValueCount> green = build_reduction_table(adjustments.srgb_g, settings.color_levels);
+    const std::array<std::uint8_t, kChannelValueCount> blue = build_reduction_table(adjustments.srgb_b, settings.color_levels);
+
+    const std::uint8_t* source_pixel = source.rgba.data();
+    std::uint8_t* result_pixel = result.rgba.data();
+    const std::size_t pixel_count = static_cast<std::size_t>(source.width) * static_cast<std::size_t>(source.height);
+
+    for (std::size_t index = 0; index < pixel_count; ++index) {
+        const float alpha = from_byte(source_pixel[3U]);
+        if (should_write_transparent(alpha, settings)) {
+            write_pixel(result_pixel, transparent_color());
+        } else if (alpha <= kEpsilon) {
+            write_pixel(result_pixel, {0, 0, 0, 255});
+        } else {
+            write_pixel(result_pixel, {
+                red[source_pixel[0U]],
+                green[source_pixel[1U]],
+                blue[source_pixel[2U]],
+                255,
+            });
+        }
+
+        source_pixel += 4U;
+        result_pixel += 4U;
+    }
+}
+
+void write_unpixelized(
+    Image& result,
+    const Image& source,
+    const AdjustmentContext& adjustments,
+    const PaletteMatcher& palette,
+    const ProcessSettings& settings)
+{
+    if (settings.dither_mode == DitherMode::None && palette.entries.empty() && adjustments.channel_independent) {
+        write_unpixelized_reduced_fast(result, source, adjustments, settings);
+        return;
+    }
+
+    for (int y = 0; y < source.height; ++y) {
+        const std::uint8_t* source_pixel = source.rgba.data()
+            + static_cast<std::size_t>(y) * static_cast<std::size_t>(source.width) * 4U;
+        std::uint8_t* result_pixel = result.rgba.data()
+            + static_cast<std::size_t>(y) * static_cast<std::size_t>(result.width) * 4U;
+
+        for (int x = 0; x < source.width; ++x) {
+            const BlockColor block = choose_single_pixel_color(source_pixel, adjustments);
+            const Vec3 dithered = apply_dither(block.srgb, x, y, settings);
+            const Color32 final_color = quantize_color(dithered, block.alpha, palette, settings);
+            write_pixel(result_pixel, final_color);
+
+            source_pixel += 4U;
+            result_pixel += 4U;
+        }
+    }
+}
+
+template <typename KernelForBlock>
+void write_pixelized_direct(
+    Image& result,
+    const Image& source,
+    int pixel_size,
+    int blocks_x,
+    int blocks_y,
+    const AdjustmentContext& adjustments,
+    const PaletteMatcher& palette,
+    const ProcessSettings& settings,
+    const KernelForBlock& kernel_for_block)
+{
+    auto write_rows = [&](int first_by, int last_by) {
+        for (int by = first_by; by < last_by; ++by) {
+            for (int bx = 0; bx < blocks_x; ++bx) {
+                const int start_x = bx * pixel_size;
+                const int start_y = by * pixel_size;
+                const int end_x = std::min(start_x + pixel_size, source.width);
+                const int end_y = std::min(start_y + pixel_size, source.height);
+                const BlockColor block = choose_block_color(source, start_x, start_y, kernel_for_block(bx, by), adjustments);
+                const Vec3 dithered = apply_dither(block.srgb, bx, by, settings);
+                const Color32 final_color = quantize_color(dithered, block.alpha, palette, settings);
+                write_block(result, start_x, start_y, end_x, end_y, final_color);
+            }
+        }
+    };
+
+    const std::size_t pixel_count = static_cast<std::size_t>(source.width) * static_cast<std::size_t>(source.height);
+    const unsigned int available_workers = std::thread::hardware_concurrency();
+    const int worker_limit = static_cast<int>(std::min(available_workers == 0U ? 1U : available_workers, 8U));
+    if (worker_limit <= 1 || blocks_y < worker_limit * 4 || pixel_count < 1'000'000U) {
+        write_rows(0, blocks_y);
+        return;
+    }
+
+    const int worker_count = std::min(worker_limit, blocks_y);
+    std::vector<std::thread> workers;
+    workers.reserve(static_cast<std::size_t>(worker_count - 1));
+
+    int first_by = 0;
+    for (int worker = 1; worker < worker_count; ++worker) {
+        const int last_by = (blocks_y * worker) / worker_count;
+        workers.emplace_back(write_rows, first_by, last_by);
+        first_by = last_by;
+    }
+
+    write_rows(first_by, blocks_y);
+
+    for (std::thread& worker : workers) {
+        worker.join();
+    }
+}
+
+template <typename KernelForBlock>
+void build_blocks(
+    std::vector<BlockColor>& blocks,
+    const Image& source,
+    int pixel_size,
+    int blocks_x,
+    int blocks_y,
+    const AdjustmentContext& adjustments,
+    const KernelForBlock& kernel_for_block)
+{
+    blocks.resize(static_cast<std::size_t>(blocks_x) * static_cast<std::size_t>(blocks_y));
+
+    auto build_rows = [&](int first_by, int last_by) {
+        for (int by = first_by; by < last_by; ++by) {
+            for (int bx = 0; bx < blocks_x; ++bx) {
+                const int start_x = bx * pixel_size;
+                const int start_y = by * pixel_size;
+                const std::size_t index = static_cast<std::size_t>(by) * static_cast<std::size_t>(blocks_x)
+                    + static_cast<std::size_t>(bx);
+                if (pixel_size == 1) {
+                    blocks[index] = choose_single_pixel_color(source.rgba.data() + index * 4U, adjustments);
+                } else {
+                    blocks[index] = choose_block_color(source, start_x, start_y, kernel_for_block(bx, by), adjustments);
+                }
+            }
+        }
+    };
+
+    const std::size_t pixel_count = static_cast<std::size_t>(source.width) * static_cast<std::size_t>(source.height);
+    const unsigned int available_workers = std::thread::hardware_concurrency();
+    const int worker_limit = static_cast<int>(std::min(available_workers == 0U ? 1U : available_workers, 8U));
+    if (worker_limit <= 1 || blocks_y < worker_limit * 4 || pixel_count < 1'000'000U) {
+        build_rows(0, blocks_y);
+        return;
+    }
+
+    const int worker_count = std::min(worker_limit, blocks_y);
+    std::vector<std::thread> workers;
+    workers.reserve(static_cast<std::size_t>(worker_count - 1));
+
+    int first_by = 0;
+    for (int worker = 1; worker < worker_count; ++worker) {
+        const int last_by = (blocks_y * worker) / worker_count;
+        workers.emplace_back(build_rows, first_by, last_by);
+        first_by = last_by;
+    }
+
+    build_rows(first_by, blocks_y);
+
+    for (std::thread& worker : workers) {
+        worker.join();
+    }
+}
+
 void diffuse_error(std::vector<Vec3>& working, int blocks_x, int blocks_y, int x, int y, Vec3 error, float scale)
 {
     if (x < 0 || y < 0 || x >= blocks_x || y >= blocks_y) {
@@ -911,7 +1297,7 @@ void write_error_diffusion(
     int blocks_x,
     int blocks_y,
     int pixel_size,
-    const std::vector<PaletteEntry>& palette_entries,
+    const PaletteMatcher& palette,
     const ProcessSettings& settings)
 {
     std::vector<Vec3> working;
@@ -940,7 +1326,7 @@ void write_error_diffusion(
             color.g = clamp01(color.g);
             color.b = clamp01(color.b);
 
-            const Color32 final_color = quantize_color(color, block.alpha, palette_entries, settings);
+            const Color32 final_color = quantize_color(color, block.alpha, palette, settings);
             const Vec3 quantized = from_color32(final_color);
             const Vec3 error = {
                 color.r - quantized.r,
@@ -1005,7 +1391,7 @@ void write_riemersma(
     int blocks_x,
     int blocks_y,
     int pixel_size,
-    const std::vector<PaletteEntry>& palette_entries,
+    const PaletteMatcher& palette,
     const ProcessSettings& settings)
 {
     static constexpr int kQueueSize = 16;
@@ -1024,6 +1410,8 @@ void write_riemersma(
         entry /= weight_sum;
     }
 
+    Vec3 weighted_error = {};
+    int next_error_index = 0;
     const float amount = normalized_dither_amount(settings.dither_amount);
     const int curve_size = next_power_of_two(std::max(blocks_x, blocks_y));
     const int curve_pixels = curve_size * curve_size;
@@ -1040,6 +1428,8 @@ void write_riemersma(
         const BlockColor& block = blocks[block_index];
         if (should_write_transparent(block.alpha, settings)) {
             error_queue.fill(Vec3{});
+            weighted_error = {};
+            next_error_index = 0;
             const int start_x = bx * pixel_size;
             const int start_y = by * pixel_size;
             const int end_x = std::min(start_x + pixel_size, result.width);
@@ -1051,24 +1441,27 @@ void write_riemersma(
         Vec3 color = block.srgb;
         // Riemersma uses the percentage as the strength of the queued Hilbert
         // curve error history, not as a spatial threshold offset.
-        for (int error_index = 0; error_index < kQueueSize; ++error_index) {
-            color.r += error_queue[static_cast<std::size_t>(error_index)].r * weights[static_cast<std::size_t>(error_index)] * amount;
-            color.g += error_queue[static_cast<std::size_t>(error_index)].g * weights[static_cast<std::size_t>(error_index)] * amount;
-            color.b += error_queue[static_cast<std::size_t>(error_index)].b * weights[static_cast<std::size_t>(error_index)] * amount;
-        }
+        color.r += weighted_error.r * amount;
+        color.g += weighted_error.g * amount;
+        color.b += weighted_error.b * amount;
         color.r = clamp01(color.r);
         color.g = clamp01(color.g);
         color.b = clamp01(color.b);
 
-        const Color32 final_color = quantize_color(color, block.alpha, palette_entries, settings);
+        const Color32 final_color = quantize_color(color, block.alpha, palette, settings);
         const Vec3 quantized = from_color32(final_color);
-        for (int error_index = kQueueSize - 1; error_index > 0; --error_index) {
-            error_queue[static_cast<std::size_t>(error_index)] = error_queue[static_cast<std::size_t>(error_index - 1)];
-        }
-        error_queue[0] = {
+        const Vec3 oldest = error_queue[static_cast<std::size_t>(next_error_index)];
+        const Vec3 error = {
             color.r - quantized.r,
             color.g - quantized.g,
             color.b - quantized.b,
+        };
+        error_queue[static_cast<std::size_t>(next_error_index)] = error;
+        next_error_index = (next_error_index + 1) % kQueueSize;
+        weighted_error = {
+            error.r * weights[0] + (weighted_error.r - oldest.r * weights[kQueueSize - 1]) * kDecay,
+            error.g * weights[0] + (weighted_error.g - oldest.g * weights[kQueueSize - 1]) * kDecay,
+            error.b * weights[0] + (weighted_error.b - oldest.b * weights[kQueueSize - 1]) * kDecay,
         };
 
         const int start_x = bx * pixel_size;
@@ -1099,49 +1492,63 @@ Image process_image(const Image& source, const ProcessSettings& settings)
     const int edge_height = source.height - (blocks_y - 1) * pixel_size;
 
     const AdjustmentContext adjustment_context = build_adjustment_context(settings.adjustments);
-    std::vector<WeightKernel> weight_kernels;
-    weight_kernels.reserve(4U);
+    const std::vector<WeightKernel> weight_kernels =
+        build_weight_kernel_cache(pixel_size, edge_width, edge_height, settings.block_color_mode);
 
     auto kernel_for_block = [&](int bx, int by) -> const WeightKernel& {
         const int width = (bx == blocks_x - 1) ? edge_width : pixel_size;
         const int height = (by == blocks_y - 1) ? edge_height : pixel_size;
-        for (const WeightKernel& kernel : weight_kernels) {
-            if (kernel.width == width && kernel.height == height) {
-                return kernel;
-            }
-        }
-
-        weight_kernels.push_back(build_weight_kernel(width, height, settings.block_color_mode));
-        return weight_kernels.back();
+        return find_weight_kernel(weight_kernels, width, height);
     };
+
+    const float dither_amount = normalized_dither_amount(settings.dither_amount);
+    const bool uses_error_diffusion = (settings.dither_mode == DitherMode::FloydSteinberg
+        || settings.dither_mode == DitherMode::JarvisJudiceNinke
+        || settings.dither_mode == DitherMode::Atkinson)
+        && dither_amount > 0.0F;
+    const bool uses_riemersma = settings.dither_mode == DitherMode::Riemersma && dither_amount > 0.0F;
+    const bool needs_generated_palette = !settings.use_palette && settings.reduction_max_colors > 0;
+
+    if (!needs_generated_palette && !uses_error_diffusion && !uses_riemersma) {
+        const PaletteMatcher palette = settings.use_palette
+            ? build_palette_matcher(settings.palette, false)
+            : PaletteMatcher{};
+        if (pixel_size == 1) {
+            write_unpixelized(result, source, adjustment_context, palette, settings);
+        } else {
+            write_pixelized_direct(
+                result,
+                source,
+                pixel_size,
+                blocks_x,
+                blocks_y,
+                adjustment_context,
+                palette,
+                settings,
+                kernel_for_block);
+        }
+        return result;
+    }
 
     std::vector<BlockColor> blocks;
     blocks.reserve(static_cast<std::size_t>(blocks_x) * static_cast<std::size_t>(blocks_y));
-
-    for (int by = 0; by < blocks_y; ++by) {
-        for (int bx = 0; bx < blocks_x; ++bx) {
-            const int start_x = bx * pixel_size;
-            const int start_y = by * pixel_size;
-            blocks.push_back(choose_block_color(source, start_x, start_y, kernel_for_block(bx, by), adjustment_context));
-        }
-    }
+    build_blocks(blocks, source, pixel_size, blocks_x, blocks_y, adjustment_context, kernel_for_block);
 
     const std::vector<Color32> generated_palette = (!settings.use_palette && settings.reduction_max_colors > 0)
         ? generate_reduced_palette(blocks, settings.reduction_max_colors, settings)
         : std::vector<Color32>{};
     const std::vector<Color32>& active_palette = settings.use_palette ? settings.palette : generated_palette;
-    const std::vector<PaletteEntry> palette_entries = build_palette_entries(active_palette);
+    const bool enable_palette_lookup = (uses_error_diffusion || uses_riemersma)
+        && active_palette.size() >= kPaletteLookupMinColors;
+    const PaletteMatcher palette = build_palette_matcher(active_palette, enable_palette_lookup);
 
-    if ((settings.dither_mode == DitherMode::FloydSteinberg
-            || settings.dither_mode == DitherMode::JarvisJudiceNinke
-            || settings.dither_mode == DitherMode::Atkinson)
-        && normalized_dither_amount(settings.dither_amount) > 0.0F) {
-        write_error_diffusion(result, blocks, blocks_x, blocks_y, pixel_size, palette_entries, settings);
+    if (uses_error_diffusion) {
+        write_error_diffusion(result, blocks, blocks_x, blocks_y, pixel_size, palette, settings);
         return result;
     }
 
-    if (settings.dither_mode == DitherMode::Riemersma && normalized_dither_amount(settings.dither_amount) > 0.0F) {
-        write_riemersma(result, blocks, blocks_x, blocks_y, pixel_size, palette_entries, settings);
+    if (uses_riemersma) {
+        write_riemersma(result, blocks, blocks_x, blocks_y, pixel_size, palette, settings);
         return result;
     }
 
@@ -1154,7 +1561,7 @@ Image process_image(const Image& source, const ProcessSettings& settings)
             const BlockColor& block = blocks[static_cast<std::size_t>(by) * static_cast<std::size_t>(blocks_x) + static_cast<std::size_t>(bx)];
             const Vec3 dithered = apply_dither(block.srgb, bx, by, settings);
 
-            const Color32 final_color = quantize_color(dithered, block.alpha, palette_entries, settings);
+            const Color32 final_color = quantize_color(dithered, block.alpha, palette, settings);
             write_block(result, start_x, start_y, end_x, end_y, final_color);
         }
     }
