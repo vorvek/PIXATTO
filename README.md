@@ -17,7 +17,7 @@ Pixelizer is a desktop image tool for turning PNG, JPG, and BMP files into pseud
 - Drag-and-drop image import with replace confirmation, plus `.hex` palette drop import
 - PNG export via `stb_image_write`
 - Validated Lospec `.hex` palette import with duplicate handling, plus in-app palette creation, color editing, color deletion, save, save-new, and palette deletion
-- Bundled Lospec default palettes that are seeded into the palette library on first launch and can still be deleted
+- Bundled default palettes, including Lospec palettes and greyscale ramps, that are seeded into the palette library on first launch and can still be deleted
 - Palettes are limited to 256 colors, whether imported or created in the app
 - Palette mapping or simpler per-channel color reduction
 - Preliminary single-bit transparency preservation with a special palette entry

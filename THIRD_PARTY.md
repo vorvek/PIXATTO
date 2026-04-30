@@ -24,12 +24,6 @@ Pixelizer bundles these default palette files from Lospec. Links point to the or
 - [msx](https://lospec.com/palette-list/msx)
 - [nintendo-entertainment-system](https://lospec.com/palette-list/nintendo-entertainment-system)
 - [amstrad-cpc](https://lospec.com/palette-list/amstrad-cpc)
-- [cga-palette-1-high](https://lospec.com/palette-list/cga-palette-1-high)
-- [cga-palette-0-high](https://lospec.com/palette-list/cga-palette-0-high)
-- [cga-palette-2-high](https://lospec.com/palette-list/cga-palette-2-high)
-- [cga-palette-1-low](https://lospec.com/palette-list/cga-palette-1-low)
-- [cga-palette-0-low](https://lospec.com/palette-list/cga-palette-0-low)
-- [cga-palette-2-low](https://lospec.com/palette-list/cga-palette-2-low)
 - [apple-ii](https://lospec.com/palette-list/apple-ii)
 
 The README screenshot and icon files are original project assets.

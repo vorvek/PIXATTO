@@ -10,14 +10,17 @@
 #include <optional>
 #include <sstream>
 #include <string_view>
+#include <vector>
 
 namespace pixelizer {
 namespace {
 
-constexpr std::string_view kInitialDefaultPaletteSeedMarker = ".lospec-default-palettes-v1";
+constexpr std::string_view kDefaultPaletteSeedMarkerV1 = ".lospec-default-palettes-v1";
 constexpr std::string_view kDefaultPaletteSeedMarkerV2 = ".lospec-default-palettes-v2";
+constexpr std::string_view kDefaultPaletteSeedMarkerV3 = ".default-palettes-v3";
+constexpr std::string_view kLegacyCgaPaletteRemovalMarker = ".cga-default-palettes-removed-v2";
 
-constexpr std::array<std::string_view, 21> kInitialDefaultPaletteFiles = {{
+constexpr std::array<std::string_view, 15> kDefaultPaletteFilesAddedInV1 = {{
     "pico-8.hex",
     "dawnbringer-16.hex",
     "dawnbringer-32.hex",
@@ -32,18 +35,33 @@ constexpr std::array<std::string_view, 21> kInitialDefaultPaletteFiles = {{
     "commodore-vic-20.hex",
     "msx.hex",
     "amstrad-cpc.hex",
-    "cga-palette-1-high.hex",
-    "cga-palette-0-high.hex",
-    "cga-palette-2-high.hex",
-    "cga-palette-1-low.hex",
-    "cga-palette-0-low.hex",
-    "cga-palette-2-low.hex",
     "apple-ii.hex",
 }};
 
 constexpr std::array<std::string_view, 2> kDefaultPaletteFilesAddedInV2 = {{
     "nintendo-entertainment-system.hex",
     "carnival-32.hex",
+}};
+
+constexpr std::array<std::string_view, 4> kDefaultPaletteFilesAddedInV3 = {{
+    "1-bit-greyscale.hex",
+    "2-bit-greyscale.hex",
+    "3-bit-greyscale.hex",
+    "4-bit-greyscale.hex",
+}};
+
+struct LegacyDefaultPaletteFile {
+    std::string_view name;
+    std::array<std::string_view, 4> colors;
+};
+
+constexpr std::array<LegacyDefaultPaletteFile, 6> kLegacyCgaDefaultPaletteFiles = {{
+    {"cga-palette-0-high.hex", {"000000", "55ff55", "ff5555", "ffff55"}},
+    {"cga-palette-0-low.hex", {"000000", "00aa00", "aa0000", "aa5500"}},
+    {"cga-palette-1-high.hex", {"000000", "ff55ff", "55ffff", "ffffff"}},
+    {"cga-palette-1-low.hex", {"000000", "aa00aa", "00aaaa", "aaaaaa"}},
+    {"cga-palette-2-high.hex", {"000000", "ff5555", "55ffff", "ffffff"}},
+    {"cga-palette-2-low.hex", {"000000", "aa0000", "00aaaa", "aaaaaa"}},
 }};
 
 std::filesystem::path palette_dir()
@@ -109,8 +127,9 @@ bool palette_dir_contains_files(const std::filesystem::path& candidate, const st
 std::optional<std::filesystem::path> default_palette_source_dir()
 {
     for (const std::filesystem::path& candidate : default_palette_dir_candidates()) {
-        if (palette_dir_contains_files(candidate, kInitialDefaultPaletteFiles)
-            && palette_dir_contains_files(candidate, kDefaultPaletteFilesAddedInV2)) {
+        if (palette_dir_contains_files(candidate, kDefaultPaletteFilesAddedInV1)
+            && palette_dir_contains_files(candidate, kDefaultPaletteFilesAddedInV2)
+            && palette_dir_contains_files(candidate, kDefaultPaletteFilesAddedInV3)) {
             return candidate;
         }
     }
@@ -154,8 +173,89 @@ void seed_palette_files(
 
     if (seeded) {
         std::ofstream output(marker);
-        output << "Lospec default palettes seeded from bundled .hex files.\n";
+        output << "Default palettes seeded from bundled .hex files.\n";
         output << "Delete palettes in the app to keep them removed.\n";
+    }
+}
+
+std::string normalize_legacy_palette_line(std::string value)
+{
+    auto not_space = [](unsigned char ch) { return std::isspace(ch) == 0; };
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), not_space));
+    value.erase(std::find_if(value.rbegin(), value.rend(), not_space).base(), value.end());
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+bool palette_file_matches_colors(
+    const std::filesystem::path& path,
+    const std::array<std::string_view, 4>& colors)
+{
+    std::ifstream input(path);
+    if (!input) {
+        return false;
+    }
+
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(input, line)) {
+        line = normalize_legacy_palette_line(std::move(line));
+        if (!line.empty()) {
+            lines.push_back(std::move(line));
+        }
+    }
+
+    if (lines.size() != colors.size()) {
+        return false;
+    }
+
+    for (std::size_t index = 0; index < colors.size(); ++index) {
+        if (lines[index] != colors[index]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void remove_palette_files_once(
+    const std::filesystem::path& dir,
+    const std::array<LegacyDefaultPaletteFile, 6>& files,
+    std::string_view marker_name)
+{
+    const auto marker = dir / std::string(marker_name);
+
+    std::error_code ec;
+    if (std::filesystem::exists(marker, ec) || ec) {
+        return;
+    }
+
+    bool removed = true;
+    for (const LegacyDefaultPaletteFile& file : files) {
+        const auto path = dir / std::string(file.name);
+        ec.clear();
+        if (!std::filesystem::exists(path, ec)) {
+            if (ec) {
+                removed = false;
+            }
+            continue;
+        }
+
+        if (!palette_file_matches_colors(path, file.colors)) {
+            continue;
+        }
+
+        ec.clear();
+        std::filesystem::remove(path, ec);
+        if (ec) {
+            removed = false;
+        }
+    }
+
+    if (removed) {
+        std::ofstream output(marker);
+        output << "Legacy CGA default palettes removed.\n";
     }
 }
 
@@ -169,13 +269,16 @@ void seed_default_palettes()
         return;
     }
 
+    remove_palette_files_once(dir, kLegacyCgaDefaultPaletteFiles, kLegacyCgaPaletteRemovalMarker);
+
     const std::optional<std::filesystem::path> source_dir = default_palette_source_dir();
     if (!source_dir) {
         return;
     }
 
-    seed_palette_files(dir, *source_dir, kInitialDefaultPaletteFiles, kInitialDefaultPaletteSeedMarker);
+    seed_palette_files(dir, *source_dir, kDefaultPaletteFilesAddedInV1, kDefaultPaletteSeedMarkerV1);
     seed_palette_files(dir, *source_dir, kDefaultPaletteFilesAddedInV2, kDefaultPaletteSeedMarkerV2);
+    seed_palette_files(dir, *source_dir, kDefaultPaletteFilesAddedInV3, kDefaultPaletteSeedMarkerV3);
 }
 
 std::string trim(std::string value)

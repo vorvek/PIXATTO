@@ -4,6 +4,7 @@
 
 - Added False Floyd Steinberg, Filter Lite, Zhigang Fan, Shiau-Fan, Stucki, Burkes, Sierra, Two Row Sierra, clustered-dot, horizontal, vertical, and diagonal dithering options.
 - Added the Lospec `nintendo-entertainment-system` and `carnival-32` palettes to the bundled defaults.
+- Replaced the CGA default palettes with local `1-bit-greyscale`, `2-bit-greyscale`, `3-bit-greyscale`, and `4-bit-greyscale` palettes, with a one-time cleanup for unchanged seeded CGA files.
 - Reworked preview processing for very small pixel sizes, especially `1x` and `2x`, to avoid building and rereading a full block grid when each block can be written directly.
 - Added a direct `1x` path that uses precomputed per-channel reduction tables for the common no-palette/no-diffusion preview case.
 - Parallelized large direct block renders across block rows, capped to a small worker count so bigger images update faster without overwhelming the UI.

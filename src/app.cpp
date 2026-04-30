@@ -40,12 +40,6 @@ constexpr const char* kLospecPaletteCredits[] = {
     "msx",
     "nintendo-entertainment-system",
     "amstrad-cpc",
-    "cga-palette-1-high",
-    "cga-palette-0-high",
-    "cga-palette-2-high",
-    "cga-palette-1-low",
-    "cga-palette-0-low",
-    "cga-palette-2-low",
     "apple-ii",
 };
 
