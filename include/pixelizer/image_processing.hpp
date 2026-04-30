@@ -41,6 +41,7 @@ struct ProcessSettings {
     int pixel_size = 8;
     BlockColorMode block_color_mode = BlockColorMode::WeightedAverage;
     bool use_palette = false;
+    bool preserve_transparency = false;
     std::vector<Color32> palette;
     int color_levels = 8;
     int reduction_max_colors = 0;

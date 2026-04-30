@@ -71,6 +71,7 @@ enum class TextId {
     Average,
     Weighted,
     UsePalette,
+    PreserveTransparency,
     NoPalettesSaved,
     UnsavedPalette,
     Palette,

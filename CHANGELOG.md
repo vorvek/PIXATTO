@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.0 - 2026-04-30
+
+- Added preliminary transparency support (single bit).
+
 ## 1.2.2 - 2026-04-29
 
 - Added a localized About dialog with project, MIT license, dependency, palette, and asset credits.

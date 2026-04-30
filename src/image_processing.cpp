@@ -11,6 +11,7 @@ namespace pixelizer {
 namespace {
 
 constexpr float kEpsilon = 0.000001F;
+constexpr float kTransparencyThreshold = 0.5F;
 constexpr int kBlueNoiseSize = 32;
 constexpr int kBlueNoiseCellCount = kBlueNoiseSize * kBlueNoiseSize;
 constexpr std::size_t kChannelValueCount = 256;
@@ -161,6 +162,11 @@ Color32 to_color32(Vec3 color, float alpha)
     };
 }
 
+Color32 transparent_color()
+{
+    return {0, 0, 0, 0};
+}
+
 Vec3 from_color32(Color32 color)
 {
     return {
@@ -168,6 +174,16 @@ Vec3 from_color32(Color32 color)
         from_byte(color.g),
         from_byte(color.b),
     };
+}
+
+bool should_write_transparent(float alpha, const ProcessSettings& settings)
+{
+    return settings.preserve_transparency && alpha < kTransparencyThreshold;
+}
+
+float output_alpha(float alpha, const ProcessSettings& settings)
+{
+    return settings.preserve_transparency ? 1.0F : alpha;
 }
 
 float apply_levels_channel(float value, float input_black, float input_white, float output_black, float output_white)
@@ -573,13 +589,17 @@ Color32 reduce_color(Vec3 color, int levels, float alpha)
 
 Color32 quantize_color(Vec3 color, float alpha, const std::vector<PaletteEntry>& palette_entries, const ProcessSettings& settings)
 {
+    if (should_write_transparent(alpha, settings)) {
+        return transparent_color();
+    }
+
     color.r = clamp01(color.r);
     color.g = clamp01(color.g);
     color.b = clamp01(color.b);
 
     return !palette_entries.empty()
-        ? nearest_palette_color(color, palette_entries, alpha)
-        : reduce_color(color, settings.color_levels, alpha);
+        ? nearest_palette_color(color, palette_entries, output_alpha(alpha, settings))
+        : reduce_color(color, settings.color_levels, output_alpha(alpha, settings));
 }
 
 std::uint32_t quant_key(Color32 color)
@@ -590,13 +610,13 @@ std::uint32_t quant_key(Color32 color)
     return (r << 10U) | (g << 5U) | b;
 }
 
-std::vector<QuantPoint> build_quant_points(const std::vector<BlockColor>& blocks)
+std::vector<QuantPoint> build_quant_points(const std::vector<BlockColor>& blocks, const ProcessSettings& settings)
 {
     std::vector<QuantPoint> points;
     points.reserve(blocks.size());
 
     for (const BlockColor& block : blocks) {
-        if (block.area <= 0 || block.alpha <= 0.0F) {
+        if (block.area <= 0 || block.alpha <= 0.0F || should_write_transparent(block.alpha, settings)) {
             continue;
         }
 
@@ -768,14 +788,14 @@ Color32 representative_for_box(const std::vector<QuantPoint>& points, QuantBox b
     }), 1.0F);
 }
 
-std::vector<Color32> generate_reduced_palette(const std::vector<BlockColor>& blocks, int max_colors)
+std::vector<Color32> generate_reduced_palette(const std::vector<BlockColor>& blocks, int max_colors, const ProcessSettings& settings)
 {
     if (max_colors <= 0) {
         return {};
     }
 
     max_colors = std::clamp(max_colors, 1, 1024);
-    std::vector<QuantPoint> points = build_quant_points(blocks);
+    std::vector<QuantPoint> points = build_quant_points(blocks, settings);
     if (points.empty()) {
         return {};
     }
@@ -911,6 +931,15 @@ void write_error_diffusion(
         for (int bx = 0; bx < blocks_x; ++bx) {
             const std::size_t index = static_cast<std::size_t>(by) * static_cast<std::size_t>(blocks_x) + static_cast<std::size_t>(bx);
             const BlockColor& block = blocks[index];
+            if (should_write_transparent(block.alpha, settings)) {
+                const int start_x = bx * pixel_size;
+                const int start_y = by * pixel_size;
+                const int end_x = std::min(start_x + pixel_size, result.width);
+                const int end_y = std::min(start_y + pixel_size, result.height);
+                write_block(result, start_x, start_y, end_x, end_y, transparent_color());
+                continue;
+            }
+
             Vec3 color = working[index];
             color.r = clamp01(color.r);
             color.g = clamp01(color.g);
@@ -1014,6 +1043,16 @@ void write_riemersma(
 
         const std::size_t block_index = static_cast<std::size_t>(by) * static_cast<std::size_t>(blocks_x) + static_cast<std::size_t>(bx);
         const BlockColor& block = blocks[block_index];
+        if (should_write_transparent(block.alpha, settings)) {
+            error_queue.fill(Vec3{});
+            const int start_x = bx * pixel_size;
+            const int start_y = by * pixel_size;
+            const int end_x = std::min(start_x + pixel_size, result.width);
+            const int end_y = std::min(start_y + pixel_size, result.height);
+            write_block(result, start_x, start_y, end_x, end_y, transparent_color());
+            continue;
+        }
+
         Vec3 color = block.srgb;
         // Riemersma uses the percentage as the strength of the queued Hilbert
         // curve error history, not as a spatial threshold offset.
@@ -1093,7 +1132,7 @@ Image process_image(const Image& source, const ProcessSettings& settings)
     }
 
     const std::vector<Color32> generated_palette = (!settings.use_palette && settings.reduction_max_colors > 0)
-        ? generate_reduced_palette(blocks, settings.reduction_max_colors)
+        ? generate_reduced_palette(blocks, settings.reduction_max_colors, settings)
         : std::vector<Color32>{};
     const std::vector<Color32>& active_palette = settings.use_palette ? settings.palette : generated_palette;
     const std::vector<PaletteEntry> palette_entries = build_palette_entries(active_palette);

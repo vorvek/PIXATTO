@@ -312,6 +312,24 @@ Color32 color_from_rgb_floats(const std::array<float, 3>& color)
     };
 }
 
+void draw_transparency_swatch(const char* id, ImVec2 size)
+{
+    ImGui::PushID(id);
+    ImGui::Dummy(size);
+    ImGui::PopID();
+
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    draw_list->AddRectFilled(min, max, IM_COL32(255, 255, 255, 255), 1.5F);
+    draw_list->AddRect(min, max, IM_COL32(0, 0, 0, 140), 1.5F);
+    draw_list->AddLine(
+        ImVec2(min.x + 2.0F, max.y - 2.0F),
+        ImVec2(max.x - 2.0F, min.y + 2.0F),
+        IM_COL32(218, 31, 45, 255),
+        2.0F);
+}
+
 ImU32 rgb(unsigned char r, unsigned char g, unsigned char b)
 {
     return IM_COL32(r, g, b, 255);
@@ -961,7 +979,25 @@ void App::render_controls()
         ImGui::EndCombo();
     }
 
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float use_palette_width = ImGui::GetFrameHeight()
+        + style.ItemInnerSpacing.x
+        + ImGui::CalcTextSize(text(TextId::UsePalette)).x;
+    const float preserve_transparency_width = ImGui::GetFrameHeight()
+        + style.ItemInnerSpacing.x
+        + ImGui::CalcTextSize(text(TextId::PreserveTransparency)).x;
+    const bool place_transparency_same_line = use_palette_width
+        + style.ItemSpacing.x
+        + preserve_transparency_width
+        <= ImGui::GetContentRegionAvail().x;
+
     if (ImGui::Checkbox(imgui_label(TextId::UsePalette, "UsePalette").c_str(), &settings_.use_palette)) {
+        mark_dirty();
+    }
+    if (place_transparency_same_line) {
+        ImGui::SameLine();
+    }
+    if (ImGui::Checkbox(imgui_label(TextId::PreserveTransparency, "PreserveTransparency").c_str(), &settings_.preserve_transparency)) {
         mark_dirty();
     }
 
@@ -1031,7 +1067,13 @@ void App::render_controls()
         }
 
         ImGui::Spacing();
-        ImGui::Text(text(TextId::PaletteCountFormat), settings_.palette.size(), kMaxPaletteColors);
+        const bool show_transparency_swatch = settings_.preserve_transparency;
+        const std::size_t displayed_palette_count = settings_.palette.size() + (show_transparency_swatch ? 1U : 0U);
+        ImGui::Text(text(TextId::PaletteCountFormat), displayed_palette_count, kMaxPaletteColors);
+        if (show_transparency_swatch) {
+            ImGui::SameLine();
+            ImGui::TextUnformatted("(*)");
+        }
         if (settings_.palette.empty()) {
             ImGui::TextDisabled("%s", text(TextId::AddColorToBegin));
         }
@@ -1039,6 +1081,12 @@ void App::render_controls()
         const float swatch = 16.0F;
         const float start_x = ImGui::GetCursorScreenPos().x;
         const float max_x = start_x + ImGui::GetContentRegionAvail().x;
+        const bool can_add_palette_color = settings_.palette.size() < kMaxPaletteColors;
+        const auto continue_palette_swatch_row = [&](bool has_more) {
+            if (has_more && ImGui::GetItemRectMax().x + swatch + ImGui::GetStyle().ItemSpacing.x < max_x) {
+                ImGui::SameLine();
+            }
+        };
         for (std::size_t color_index = 0; color_index < settings_.palette.size(); ++color_index) {
             const Color32 color = settings_.palette[color_index];
             ImGui::PushID(static_cast<int>(color_index));
@@ -1050,12 +1098,19 @@ void App::render_controls()
                 ImGui::SetTooltip("%s", tooltip.c_str());
             }
             ImGui::PopID();
-            if (ImGui::GetItemRectMax().x + swatch + ImGui::GetStyle().ItemSpacing.x < max_x) {
-                ImGui::SameLine();
-            }
+            const bool has_more = color_index + 1U < settings_.palette.size() || show_transparency_swatch || can_add_palette_color;
+            continue_palette_swatch_row(has_more);
         }
 
-        if (settings_.palette.size() < kMaxPaletteColors) {
+        if (show_transparency_swatch) {
+            draw_transparency_swatch("TransparencySwatch", ImVec2(swatch, swatch));
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", text(TextId::PreserveTransparency));
+            }
+            continue_palette_swatch_row(can_add_palette_color);
+        }
+
+        if (can_add_palette_color) {
             if (ImGui::Button("+##AddPaletteColor", ImVec2(swatch, swatch))) {
                 request_add_palette_color();
             }
