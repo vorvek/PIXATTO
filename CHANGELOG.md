@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.1 - 2026-04-30
+
+- Made native file picker dialogs behave modally in the app by disabling controls, drops, and shortcuts until the picker closes.
+- Added a status message when the platform file picker cannot be opened.
+
 ## 1.3.0 - 2026-04-30
 
 - Added preliminary transparency support (single bit).

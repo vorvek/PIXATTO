@@ -54,7 +54,9 @@ private:
 
     struct PendingDialog {
         DialogKind kind;
-        std::string path;
+        std::optional<std::string> path;
+        bool failed = false;
+        std::string error;
     };
 
     struct DialogState;
@@ -192,6 +194,7 @@ private:
     std::optional<PendingPaletteImportState> pending_palette_import_;
     bool open_drop_confirm_ = false;
     bool open_delete_palette_confirm_ = false;
+    bool file_dialog_open_ = false;
     std::optional<HistorySnapshot> active_edit_snapshot_;
     std::optional<NumberEditState> number_edit_;
     std::optional<PaletteColorEditState> palette_color_edit_;

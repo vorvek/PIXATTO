@@ -141,6 +141,7 @@ enum class TextId {
     AllFilesFilter,
     LospecPalettesFilter,
     PngImageFilter,
+    StatusFileDialogFailedFormat,
     StatusOpenImageToBegin,
     StatusPreviewUpdatedFormat,
     StatusImageLoadFailedFormat,

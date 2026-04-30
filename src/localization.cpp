@@ -135,6 +135,7 @@ constexpr Translation kEnglish[] = {
     {TextId::AllFilesFilter, "All files"},
     {TextId::LospecPalettesFilter, "Lospec palettes"},
     {TextId::PngImageFilter, "PNG image"},
+    {TextId::StatusFileDialogFailedFormat, "File dialog failed: {error}"},
     {TextId::StatusOpenImageToBegin, "Open an image to begin."},
     {TextId::StatusPreviewUpdatedFormat, "Preview updated in {ms} ms."},
     {TextId::StatusImageLoadFailedFormat, "Image load failed: {error}"},

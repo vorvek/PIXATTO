@@ -684,7 +684,7 @@ void App::process_events(bool& running)
         if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(window_)) {
             running = false;
         }
-        if (event.type == SDL_EVENT_DROP_FILE && event.drop.data) {
+        if (!file_dialog_open_ && event.type == SDL_EVENT_DROP_FILE && event.drop.data) {
             handle_dropped_file(event.drop.data);
         }
     }
@@ -708,7 +708,11 @@ void App::render_frame()
         | ImGuiWindowFlags_NoMove
         | ImGuiWindowFlags_NoSavedSettings
         | ImGuiWindowFlags_NoBringToFrontOnFocus;
+    const bool disable_workspace = file_dialog_open_;
     ImGui::Begin("Pixelizer Workspace", nullptr, flags);
+    if (disable_workspace) {
+        ImGui::BeginDisabled();
+    }
 
     const float control_width = std::clamp(ImGui::GetContentRegionAvail().x * 0.24F, 300.0F, 390.0F);
     ImGui::BeginChild("Controls", ImVec2(control_width, 0), ImGuiChildFlags_Borders);
@@ -721,6 +725,9 @@ void App::render_frame()
     render_viewports();
     ImGui::EndChild();
 
+    if (disable_workspace) {
+        ImGui::EndDisabled();
+    }
     ImGui::End();
 
     render_number_edit_popup();
@@ -745,6 +752,11 @@ void App::render_menu_bar()
 {
     if (!ImGui::BeginMainMenuBar()) {
         return;
+    }
+
+    const bool disable_menu = file_dialog_open_;
+    if (disable_menu) {
+        ImGui::BeginDisabled();
     }
 
     if (ImGui::Button(imgui_label(TextId::OpenImage, "OpenImage").c_str())) {
@@ -819,6 +831,9 @@ void App::render_menu_bar()
         ImGui::SetTooltip("%s", text(TextId::AboutButtonTooltip));
     }
 
+    if (disable_menu) {
+        ImGui::EndDisabled();
+    }
     ImGui::EndMainMenuBar();
 }
 
@@ -1720,7 +1735,7 @@ void App::render_save_palette_popup()
 void App::handle_shortcuts()
 {
     ImGuiIO& io = ImGui::GetIO();
-    if (number_edit_ || palette_color_edit_ || palette_save_as_ || pending_palette_import_
+    if (file_dialog_open_ || number_edit_ || palette_color_edit_ || palette_save_as_ || pending_palette_import_
         || io.WantTextInput || !io.KeyCtrl || !ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
         return;
     }
@@ -1846,32 +1861,47 @@ void App::destroy_texture(Texture& texture)
 
 void App::request_open_image()
 {
+    if (file_dialog_open_) {
+        return;
+    }
+
     static std::array<SDL_DialogFileFilter, 2> filters;
     filters = {{
         {text(TextId::ImagesFilter), "png;jpg;jpeg;bmp"},
         {text(TextId::AllFilesFilter), "*"},
     }};
+    file_dialog_open_ = true;
     auto* payload = new DialogPayload{dialog_state_, DialogKind::OpenImage};
     SDL_ShowOpenFileDialog(dialog_callback, payload, window_, filters.data(), static_cast<int>(filters.size()), nullptr, false);
 }
 
 void App::request_import_palette()
 {
+    if (file_dialog_open_) {
+        return;
+    }
+
     static std::array<SDL_DialogFileFilter, 2> filters;
     filters = {{
         {text(TextId::LospecPalettesFilter), "hex"},
         {text(TextId::AllFilesFilter), "*"},
     }};
+    file_dialog_open_ = true;
     auto* payload = new DialogPayload{dialog_state_, DialogKind::ImportPalette};
     SDL_ShowOpenFileDialog(dialog_callback, payload, window_, filters.data(), static_cast<int>(filters.size()), nullptr, false);
 }
 
 void App::request_export_png()
 {
+    if (file_dialog_open_) {
+        return;
+    }
+
     static std::array<SDL_DialogFileFilter, 1> filters;
     filters = {{
         {text(TextId::PngImageFilter), "png"},
     }};
+    file_dialog_open_ = true;
     auto* payload = new DialogPayload{dialog_state_, DialogKind::ExportPng};
     SDL_ShowSaveFileDialog(dialog_callback, payload, window_, filters.data(), static_cast<int>(filters.size()), nullptr);
 }
@@ -1884,12 +1914,23 @@ void App::dialog_callback(void* userdata, const char* const* filelist, int)
     }
 
     auto state = payload->state.lock();
-    if (!state || !filelist || !filelist[0]) {
+    if (!state) {
         return;
     }
 
+    PendingDialog dialog;
+    dialog.kind = payload->kind;
+    if (!filelist) {
+        dialog.failed = true;
+        if (const char* error = SDL_GetError(); error && *error != '\0') {
+            dialog.error = error;
+        }
+    } else if (filelist[0]) {
+        dialog.path = filelist[0];
+    }
+
     std::lock_guard<std::mutex> lock(state->mutex);
-    state->pending_dialogs.push_back({payload->kind, filelist[0]});
+    state->pending_dialogs.push_back(std::move(dialog));
 }
 
 void App::handle_pending_dialogs()
@@ -1906,15 +1947,25 @@ void App::handle_pending_dialogs()
     }
 
     for (const PendingDialog& dialog : dialogs) {
+        file_dialog_open_ = false;
+        if (dialog.failed) {
+            const std::string error = dialog.error.empty() ? "unknown error" : dialog.error;
+            set_status(textf(TextId::StatusFileDialogFailedFormat, {{"error", error}}));
+            continue;
+        }
+        if (!dialog.path) {
+            continue;
+        }
+
         switch (dialog.kind) {
         case DialogKind::OpenImage:
-            load_image_from_path(dialog.path);
+            load_image_from_path(*dialog.path);
             break;
         case DialogKind::ImportPalette:
-            import_palette_from_path(dialog.path);
+            import_palette_from_path(*dialog.path);
             break;
         case DialogKind::ExportPng:
-            export_result_to_path(dialog.path);
+            export_result_to_path(*dialog.path);
             break;
         }
     }
