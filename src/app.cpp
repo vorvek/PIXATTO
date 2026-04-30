@@ -29,6 +29,7 @@ constexpr const char* kLospecPaletteCredits[] = {
     "dawnbringer-32",
     "shmupy-16",
     "aurora",
+    "carnival-32",
     "db-iso22",
     "amiga-pixels-64",
     "2bit-demichrome",
@@ -37,6 +38,7 @@ constexpr const char* kLospecPaletteCredits[] = {
     "commodore64",
     "commodore-vic-20",
     "msx",
+    "nintendo-entertainment-system",
     "amstrad-cpc",
     "cga-palette-1-high",
     "cga-palette-0-high",
@@ -58,12 +60,46 @@ TextId dither_label(DitherMode mode)
         return TextId::BlueNoise;
     case DitherMode::FloydSteinberg:
         return TextId::FloydSteinberg;
+    case DitherMode::FalseFloydSteinberg:
+        return TextId::FalseFloydSteinberg;
+    case DitherMode::FilterLite:
+        return TextId::FilterLite;
+    case DitherMode::ZhigangFan:
+        return TextId::ZhigangFan;
+    case DitherMode::ShiauFan:
+        return TextId::ShiauFan;
     case DitherMode::JarvisJudiceNinke:
         return TextId::JarvisJudiceNinke;
     case DitherMode::Atkinson:
         return TextId::Atkinson;
+    case DitherMode::Stucki:
+        return TextId::Stucki;
+    case DitherMode::Burkes:
+        return TextId::Burkes;
+    case DitherMode::Sierra:
+        return TextId::Sierra;
+    case DitherMode::TwoRowSierra:
+        return TextId::TwoRowSierra;
     case DitherMode::Riemersma:
         return TextId::Riemersma;
+    case DitherMode::ClusterDot4x4:
+        return TextId::ClusterDot4x4;
+    case DitherMode::ClusterDot8x8:
+        return TextId::ClusterDot8x8;
+    case DitherMode::Horizontal2x2:
+        return TextId::Horizontal2x2;
+    case DitherMode::Horizontal8x1:
+        return TextId::Horizontal8x1;
+    case DitherMode::Horizontal12x4:
+        return TextId::Horizontal12x4;
+    case DitherMode::Vertical2x2:
+        return TextId::Vertical2x2;
+    case DitherMode::Vertical1x8:
+        return TextId::Vertical1x8;
+    case DitherMode::Vertical4x12:
+        return TextId::Vertical4x12;
+    case DitherMode::Diagonal5x5:
+        return TextId::Diagonal5x5;
     }
     return TextId::None;
 }
@@ -1113,9 +1149,26 @@ void App::render_controls()
                  DitherMode::Bayer,
                  DitherMode::BlueNoise,
                  DitherMode::FloydSteinberg,
+                 DitherMode::FalseFloydSteinberg,
+                 DitherMode::FilterLite,
+                 DitherMode::ZhigangFan,
+                 DitherMode::ShiauFan,
                  DitherMode::JarvisJudiceNinke,
                  DitherMode::Atkinson,
+                 DitherMode::Stucki,
+                 DitherMode::Burkes,
+                 DitherMode::Sierra,
+                 DitherMode::TwoRowSierra,
                  DitherMode::Riemersma,
+                 DitherMode::ClusterDot4x4,
+                 DitherMode::ClusterDot8x8,
+                 DitherMode::Horizontal2x2,
+                 DitherMode::Horizontal8x1,
+                 DitherMode::Horizontal12x4,
+                 DitherMode::Vertical2x2,
+                 DitherMode::Vertical1x8,
+                 DitherMode::Vertical4x12,
+                 DitherMode::Diagonal5x5,
             }) {
             const bool selected = settings.dither_mode == mode;
             if (ImGui::Selectable(text(dither_label(mode)), selected)) {

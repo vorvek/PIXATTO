@@ -97,6 +97,13 @@ struct DiffusionStep {
     float weight = 0.0F;
 };
 
+struct OrderedDitherMap {
+    int width = 0;
+    int height = 0;
+    int levels = 0;
+    const int* cells = nullptr;
+};
+
 float clamp01(float value)
 {
     return std::clamp(value, 0.0F, 1.0F);
@@ -724,6 +731,173 @@ float bayer_threshold(int x, int y, int requested_size)
     return (static_cast<float>(index) + 0.5F) / denominator - 0.5F;
 }
 
+int wrapped_index(int value, int size)
+{
+    const int wrapped = value % size;
+    return wrapped < 0 ? wrapped + size : wrapped;
+}
+
+bool is_error_diffusion_mode(DitherMode mode)
+{
+    switch (mode) {
+    case DitherMode::FloydSteinberg:
+    case DitherMode::FalseFloydSteinberg:
+    case DitherMode::FilterLite:
+    case DitherMode::ZhigangFan:
+    case DitherMode::ShiauFan:
+    case DitherMode::JarvisJudiceNinke:
+    case DitherMode::Atkinson:
+    case DitherMode::Stucki:
+    case DitherMode::Burkes:
+    case DitherMode::Sierra:
+    case DitherMode::TwoRowSierra:
+        return true;
+    case DitherMode::None:
+    case DitherMode::Bayer:
+    case DitherMode::BlueNoise:
+    case DitherMode::Riemersma:
+    case DitherMode::ClusterDot4x4:
+    case DitherMode::ClusterDot8x8:
+    case DitherMode::Horizontal2x2:
+    case DitherMode::Horizontal8x1:
+    case DitherMode::Horizontal12x4:
+    case DitherMode::Vertical2x2:
+    case DitherMode::Vertical1x8:
+    case DitherMode::Vertical4x12:
+    case DitherMode::Diagonal5x5:
+        return false;
+    }
+    return false;
+}
+
+const OrderedDitherMap* ordered_dither_map(DitherMode mode)
+{
+    static constexpr std::array<int, 16> cluster_dot_4x4 = {
+        12, 5, 6, 13,
+        4, 0, 1, 7,
+        11, 3, 2, 8,
+        15, 10, 9, 14,
+    };
+    static constexpr std::array<int, 64> cluster_dot_8x8 = {
+        3, 9, 17, 27, 25, 15, 7, 1,
+        11, 29, 38, 46, 44, 36, 23, 5,
+        19, 40, 52, 58, 56, 50, 34, 13,
+        31, 48, 60, 63, 62, 54, 42, 21,
+        30, 47, 59, 63, 61, 53, 41, 20,
+        18, 39, 51, 57, 55, 49, 33, 12,
+        10, 28, 37, 45, 43, 35, 22, 4,
+        2, 8, 16, 26, 24, 14, 6, 0,
+    };
+    static constexpr std::array<int, 4> horizontal_2x2 = {
+        0, 0,
+        1, 1,
+    };
+    static constexpr std::array<int, 8> horizontal_8x1 = {
+        0, 1, 2, 3, 4, 5, 6, 7,
+    };
+    static constexpr std::array<int, 48> horizontal_12x4 = {
+        6, 7, 7, 7, 7, 6, 5, 5, 4, 4, 4, 5,
+        1, 0, 0, 0, 0, 1, 2, 3, 3, 3, 2, 2,
+        5, 5, 4, 4, 4, 5, 6, 7, 7, 7, 7, 6,
+        2, 3, 3, 3, 2, 2, 1, 0, 0, 0, 0, 1,
+    };
+    static constexpr std::array<int, 4> vertical_2x2 = {
+        0, 1,
+        0, 1,
+    };
+    static constexpr std::array<int, 8> vertical_1x8 = {
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+    };
+    static constexpr std::array<int, 48> vertical_4x12 = {
+        6, 1, 5, 2,
+        7, 0, 5, 3,
+        7, 0, 4, 3,
+        7, 0, 4, 3,
+        7, 0, 4, 2,
+        6, 1, 5, 2,
+        5, 2, 6, 1,
+        5, 3, 7, 0,
+        4, 3, 7, 0,
+        4, 3, 7, 0,
+        4, 2, 7, 0,
+        5, 2, 6, 1,
+    };
+    static constexpr std::array<int, 25> diagonal_5x5 = {
+        3, 1, 0, 2, 4,
+        1, 0, 2, 4, 3,
+        0, 2, 4, 3, 1,
+        2, 4, 3, 1, 0,
+        4, 3, 1, 0, 2,
+    };
+
+    static const OrderedDitherMap cluster_dot_4x4_map{4, 4, 16, cluster_dot_4x4.data()};
+    static const OrderedDitherMap cluster_dot_8x8_map{8, 8, 64, cluster_dot_8x8.data()};
+    static const OrderedDitherMap horizontal_2x2_map{2, 2, 2, horizontal_2x2.data()};
+    static const OrderedDitherMap horizontal_8x1_map{8, 1, 8, horizontal_8x1.data()};
+    static const OrderedDitherMap horizontal_12x4_map{12, 4, 8, horizontal_12x4.data()};
+    static const OrderedDitherMap vertical_2x2_map{2, 2, 2, vertical_2x2.data()};
+    static const OrderedDitherMap vertical_1x8_map{1, 8, 8, vertical_1x8.data()};
+    static const OrderedDitherMap vertical_4x12_map{4, 12, 8, vertical_4x12.data()};
+    static const OrderedDitherMap diagonal_5x5_map{5, 5, 5, diagonal_5x5.data()};
+
+    switch (mode) {
+    case DitherMode::ClusterDot4x4:
+        return &cluster_dot_4x4_map;
+    case DitherMode::ClusterDot8x8:
+        return &cluster_dot_8x8_map;
+    case DitherMode::Horizontal2x2:
+        return &horizontal_2x2_map;
+    case DitherMode::Horizontal8x1:
+        return &horizontal_8x1_map;
+    case DitherMode::Horizontal12x4:
+        return &horizontal_12x4_map;
+    case DitherMode::Vertical2x2:
+        return &vertical_2x2_map;
+    case DitherMode::Vertical1x8:
+        return &vertical_1x8_map;
+    case DitherMode::Vertical4x12:
+        return &vertical_4x12_map;
+    case DitherMode::Diagonal5x5:
+        return &diagonal_5x5_map;
+    case DitherMode::None:
+    case DitherMode::Bayer:
+    case DitherMode::BlueNoise:
+    case DitherMode::FloydSteinberg:
+    case DitherMode::FalseFloydSteinberg:
+    case DitherMode::FilterLite:
+    case DitherMode::ZhigangFan:
+    case DitherMode::ShiauFan:
+    case DitherMode::JarvisJudiceNinke:
+    case DitherMode::Atkinson:
+    case DitherMode::Stucki:
+    case DitherMode::Burkes:
+    case DitherMode::Sierra:
+    case DitherMode::TwoRowSierra:
+    case DitherMode::Riemersma:
+        return nullptr;
+    }
+    return nullptr;
+}
+
+float ordered_map_threshold(int x, int y, const OrderedDitherMap& map)
+{
+    if (!map.cells || map.width <= 0 || map.height <= 0 || map.levels <= 0) {
+        return 0.0F;
+    }
+
+    const int wrapped_x = wrapped_index(x, map.width);
+    const int wrapped_y = wrapped_index(y, map.height);
+    const int cell = map.cells[static_cast<std::size_t>(wrapped_y * map.width + wrapped_x)];
+    return (static_cast<float>(cell) + 0.5F) / static_cast<float>(map.levels) - 0.5F;
+}
+
 float normalized_dither_amount(float amount)
 {
     if (amount > 1.0F) {
@@ -736,9 +910,7 @@ Vec3 apply_dither(Vec3 color, int block_x, int block_y, const ProcessSettings& s
 {
     const float amount = normalized_dither_amount(settings.dither_amount);
     if (settings.dither_mode == DitherMode::None
-        || settings.dither_mode == DitherMode::FloydSteinberg
-        || settings.dither_mode == DitherMode::JarvisJudiceNinke
-        || settings.dither_mode == DitherMode::Atkinson
+        || is_error_diffusion_mode(settings.dither_mode)
         || settings.dither_mode == DitherMode::Riemersma
         || amount <= 0.0F) {
         return color;
@@ -749,6 +921,10 @@ Vec3 apply_dither(Vec3 color, int block_x, int block_y, const ProcessSettings& s
         threshold = bayer_threshold(block_x, block_y, settings.bayer_matrix_size);
     } else if (settings.dither_mode == DitherMode::BlueNoise) {
         threshold = blue_noise_threshold(block_x, block_y, settings.blue_noise_seed);
+    } else if (const OrderedDitherMap* map = ordered_dither_map(settings.dither_mode)) {
+        threshold = ordered_map_threshold(block_x, block_y, *map);
+    } else {
+        return color;
     }
 
     // Ordered dithers use the percentage as threshold amplitude: 100% applies
@@ -1259,6 +1435,28 @@ const std::vector<DiffusionStep>& diffusion_steps(DitherMode mode)
         {0, 1, 5.0F / 16.0F},
         {1, 1, 1.0F / 16.0F},
     };
+    static const std::vector<DiffusionStep> false_floyd_steinberg = {
+        {1, 0, 3.0F / 8.0F},
+        {0, 1, 3.0F / 8.0F},
+        {1, 1, 2.0F / 8.0F},
+    };
+    static const std::vector<DiffusionStep> filter_lite = {
+        {1, 0, 2.0F / 4.0F},
+        {-1, 1, 1.0F / 4.0F},
+        {0, 1, 1.0F / 4.0F},
+    };
+    static const std::vector<DiffusionStep> zhigang_fan = {
+        {1, 0, 7.0F / 16.0F},
+        {-2, 1, 1.0F / 16.0F},
+        {-1, 1, 3.0F / 16.0F},
+        {0, 1, 5.0F / 16.0F},
+    };
+    static const std::vector<DiffusionStep> shiau_fan = {
+        {1, 0, 1.0F / 2.0F},
+        {-1, 1, 1.0F / 8.0F},
+        {0, 1, 1.0F / 8.0F},
+        {1, 1, 1.0F / 4.0F},
+    };
     static const std::vector<DiffusionStep> jarvis_judice_ninke = {
         {1, 0, 7.0F / 48.0F},
         {2, 0, 5.0F / 48.0F},
@@ -1281,12 +1479,80 @@ const std::vector<DiffusionStep>& diffusion_steps(DitherMode mode)
         {1, 1, 1.0F / 8.0F},
         {0, 2, 1.0F / 8.0F},
     };
+    static const std::vector<DiffusionStep> stucki = {
+        {1, 0, 8.0F / 42.0F},
+        {2, 0, 4.0F / 42.0F},
+        {-2, 1, 2.0F / 42.0F},
+        {-1, 1, 4.0F / 42.0F},
+        {0, 1, 8.0F / 42.0F},
+        {1, 1, 4.0F / 42.0F},
+        {2, 1, 2.0F / 42.0F},
+        {-2, 2, 1.0F / 42.0F},
+        {-1, 2, 2.0F / 42.0F},
+        {0, 2, 4.0F / 42.0F},
+        {1, 2, 2.0F / 42.0F},
+        {2, 2, 1.0F / 42.0F},
+    };
+    static const std::vector<DiffusionStep> burkes = {
+        {1, 0, 8.0F / 32.0F},
+        {2, 0, 4.0F / 32.0F},
+        {-2, 1, 2.0F / 32.0F},
+        {-1, 1, 4.0F / 32.0F},
+        {0, 1, 8.0F / 32.0F},
+        {1, 1, 4.0F / 32.0F},
+        {2, 1, 2.0F / 32.0F},
+    };
+    static const std::vector<DiffusionStep> sierra = {
+        {1, 0, 5.0F / 32.0F},
+        {2, 0, 3.0F / 32.0F},
+        {-2, 1, 2.0F / 32.0F},
+        {-1, 1, 4.0F / 32.0F},
+        {0, 1, 5.0F / 32.0F},
+        {1, 1, 4.0F / 32.0F},
+        {2, 1, 2.0F / 32.0F},
+        {-1, 2, 2.0F / 32.0F},
+        {0, 2, 3.0F / 32.0F},
+        {1, 2, 2.0F / 32.0F},
+    };
+    static const std::vector<DiffusionStep> two_row_sierra = {
+        {1, 0, 4.0F / 16.0F},
+        {2, 0, 3.0F / 16.0F},
+        {-2, 1, 1.0F / 16.0F},
+        {-1, 1, 2.0F / 16.0F},
+        {0, 1, 3.0F / 16.0F},
+        {1, 1, 2.0F / 16.0F},
+        {2, 1, 1.0F / 16.0F},
+    };
 
+    if (mode == DitherMode::FalseFloydSteinberg) {
+        return false_floyd_steinberg;
+    }
+    if (mode == DitherMode::FilterLite) {
+        return filter_lite;
+    }
+    if (mode == DitherMode::ZhigangFan) {
+        return zhigang_fan;
+    }
+    if (mode == DitherMode::ShiauFan) {
+        return shiau_fan;
+    }
     if (mode == DitherMode::JarvisJudiceNinke) {
         return jarvis_judice_ninke;
     }
     if (mode == DitherMode::Atkinson) {
         return atkinson;
+    }
+    if (mode == DitherMode::Stucki) {
+        return stucki;
+    }
+    if (mode == DitherMode::Burkes) {
+        return burkes;
+    }
+    if (mode == DitherMode::Sierra) {
+        return sierra;
+    }
+    if (mode == DitherMode::TwoRowSierra) {
+        return two_row_sierra;
     }
     return floyd_steinberg;
 }
@@ -1335,9 +1601,8 @@ void write_error_diffusion(
             };
 
             // Diffusion dithers use the percentage as error feedback gain:
-            // Floyd-Steinberg and Jarvis-Judice-Ninke reach their full kernels
-            // at 100%, while Atkinson still keeps its classic partial-error
-            // look because the kernel weights intentionally sum below 1.
+            // full-error kernels reach their complete weights at 100%, while
+            // partial-error kernels keep their classic lighter feedback.
             for (const DiffusionStep step : steps) {
                 diffuse_error(working, blocks_x, blocks_y, bx + step.dx, by + step.dy, error, amount * step.weight);
             }
@@ -1502,10 +1767,7 @@ Image process_image(const Image& source, const ProcessSettings& settings)
     };
 
     const float dither_amount = normalized_dither_amount(settings.dither_amount);
-    const bool uses_error_diffusion = (settings.dither_mode == DitherMode::FloydSteinberg
-        || settings.dither_mode == DitherMode::JarvisJudiceNinke
-        || settings.dither_mode == DitherMode::Atkinson)
-        && dither_amount > 0.0F;
+    const bool uses_error_diffusion = is_error_diffusion_mode(settings.dither_mode) && dither_amount > 0.0F;
     const bool uses_riemersma = settings.dither_mode == DitherMode::Riemersma && dither_amount > 0.0F;
     const bool needs_generated_palette = !settings.use_palette && settings.reduction_max_colors > 0;
 

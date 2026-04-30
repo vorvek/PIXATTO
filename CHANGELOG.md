@@ -2,6 +2,8 @@
 
 ## 1.4.0 - 2026-04-30
 
+- Added False Floyd Steinberg, Filter Lite, Zhigang Fan, Shiau-Fan, Stucki, Burkes, Sierra, Two Row Sierra, clustered-dot, horizontal, vertical, and diagonal dithering options.
+- Added the Lospec `nintendo-entertainment-system` and `carnival-32` palettes to the bundled defaults.
 - Reworked preview processing for very small pixel sizes, especially `1x` and `2x`, to avoid building and rereading a full block grid when each block can be written directly.
 - Added a direct `1x` path that uses precomputed per-channel reduction tables for the common no-palette/no-diffusion preview case.
 - Parallelized large direct block renders across block rows, capped to a small worker count so bigger images update faster without overwhelming the UI.

@@ -166,6 +166,62 @@ void paletted_riemersma_outputs_palette_colors()
     }
 }
 
+void added_dither_modes_create_two_tone_patterns()
+{
+    std::vector<unsigned char> pixels(static_cast<std::size_t>(12 * 12 * 4), 255);
+    for (std::size_t index = 0; index < pixels.size(); index += 4U) {
+        pixels[index] = 128;
+        pixels[index + 1U] = 128;
+        pixels[index + 2U] = 128;
+        pixels[index + 3U] = 255;
+    }
+
+    const pixelizer::Image source = {12, 12, pixels};
+    const std::vector<pixelizer::DitherMode> modes = {
+        pixelizer::DitherMode::FalseFloydSteinberg,
+        pixelizer::DitherMode::FilterLite,
+        pixelizer::DitherMode::ZhigangFan,
+        pixelizer::DitherMode::ShiauFan,
+        pixelizer::DitherMode::Stucki,
+        pixelizer::DitherMode::Burkes,
+        pixelizer::DitherMode::Sierra,
+        pixelizer::DitherMode::TwoRowSierra,
+        pixelizer::DitherMode::ClusterDot4x4,
+        pixelizer::DitherMode::ClusterDot8x8,
+        pixelizer::DitherMode::Horizontal2x2,
+        pixelizer::DitherMode::Horizontal8x1,
+        pixelizer::DitherMode::Horizontal12x4,
+        pixelizer::DitherMode::Vertical2x2,
+        pixelizer::DitherMode::Vertical1x8,
+        pixelizer::DitherMode::Vertical4x12,
+        pixelizer::DitherMode::Diagonal5x5,
+    };
+
+    pixelizer::ProcessSettings settings;
+    settings.pixel_size = 1;
+    settings.color_levels = 2;
+    settings.dither_amount = 1.0F;
+
+    for (const pixelizer::DitherMode mode : modes) {
+        settings.dither_mode = mode;
+        const pixelizer::Image result = pixelizer::process_image(source, settings);
+        require(result.width == source.width);
+        require(result.height == source.height);
+
+        bool has_black = false;
+        bool has_white = false;
+        for (std::size_t index = 0; index < result.rgba.size(); index += 4U) {
+            const bool black = result.rgba[index] == 0 && result.rgba[index + 1U] == 0 && result.rgba[index + 2U] == 0;
+            const bool white = result.rgba[index] == 255 && result.rgba[index + 1U] == 255 && result.rgba[index + 2U] == 255;
+            has_black = has_black || black;
+            has_white = has_white || white;
+        }
+
+        require(has_black);
+        require(has_white);
+    }
+}
+
 } // namespace
 
 int main()
@@ -173,5 +229,6 @@ int main()
     one_pixel_fast_path_matches_one_pixel_block_path();
     pixel_size_one_writes_each_source_pixel();
     paletted_riemersma_outputs_palette_colors();
+    added_dither_modes_create_two_tone_patterns();
     return 0;
 }

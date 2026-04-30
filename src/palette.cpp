@@ -14,9 +14,10 @@
 namespace pixelizer {
 namespace {
 
-constexpr std::string_view kDefaultPaletteSeedMarker = ".lospec-default-palettes-v1";
+constexpr std::string_view kInitialDefaultPaletteSeedMarker = ".lospec-default-palettes-v1";
+constexpr std::string_view kDefaultPaletteSeedMarkerV2 = ".lospec-default-palettes-v2";
 
-constexpr std::array<std::string_view, 21> kDefaultPaletteFiles = {{
+constexpr std::array<std::string_view, 21> kInitialDefaultPaletteFiles = {{
     "pico-8.hex",
     "dawnbringer-16.hex",
     "dawnbringer-32.hex",
@@ -38,6 +39,11 @@ constexpr std::array<std::string_view, 21> kDefaultPaletteFiles = {{
     "cga-palette-0-low.hex",
     "cga-palette-2-low.hex",
     "apple-ii.hex",
+}};
+
+constexpr std::array<std::string_view, 2> kDefaultPaletteFilesAddedInV2 = {{
+    "nintendo-entertainment-system.hex",
+    "carnival-32.hex",
 }};
 
 std::filesystem::path palette_dir()
@@ -88,48 +94,46 @@ std::vector<std::filesystem::path> default_palette_dir_candidates()
     return candidates;
 }
 
+template <std::size_t Size>
+bool palette_dir_contains_files(const std::filesystem::path& candidate, const std::array<std::string_view, Size>& files)
+{
+    for (const std::string_view file : files) {
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(candidate / std::string(file), ec)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 std::optional<std::filesystem::path> default_palette_source_dir()
 {
     for (const std::filesystem::path& candidate : default_palette_dir_candidates()) {
-        bool complete = true;
-        for (const std::string_view file : kDefaultPaletteFiles) {
-            std::error_code ec;
-            if (!std::filesystem::is_regular_file(candidate / std::string(file), ec)) {
-                complete = false;
-                break;
-            }
-        }
-        if (complete) {
+        if (palette_dir_contains_files(candidate, kInitialDefaultPaletteFiles)
+            && palette_dir_contains_files(candidate, kDefaultPaletteFilesAddedInV2)) {
             return candidate;
         }
     }
     return std::nullopt;
 }
 
-void seed_default_palettes()
+template <std::size_t Size>
+void seed_palette_files(
+    const std::filesystem::path& dir,
+    const std::filesystem::path& source_dir,
+    const std::array<std::string_view, Size>& files,
+    std::string_view marker_name)
 {
-    const auto dir = palette_dir();
-    const auto marker = dir / std::string(kDefaultPaletteSeedMarker);
+    const auto marker = dir / std::string(marker_name);
 
     std::error_code ec;
-    std::filesystem::create_directories(dir, ec);
-    if (ec) {
-        return;
-    }
-
-    ec.clear();
     if (std::filesystem::exists(marker, ec) || ec) {
         return;
     }
 
-    const std::optional<std::filesystem::path> source_dir = default_palette_source_dir();
-    if (!source_dir) {
-        return;
-    }
-
     bool seeded = true;
-    for (const std::string_view file : kDefaultPaletteFiles) {
-        const auto source = *source_dir / std::string(file);
+    for (const std::string_view file : files) {
+        const auto source = source_dir / std::string(file);
         const auto destination = dir / std::string(file);
         ec.clear();
         const bool destination_exists = std::filesystem::exists(destination, ec);
@@ -153,6 +157,25 @@ void seed_default_palettes()
         output << "Lospec default palettes seeded from bundled .hex files.\n";
         output << "Delete palettes in the app to keep them removed.\n";
     }
+}
+
+void seed_default_palettes()
+{
+    const auto dir = palette_dir();
+
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) {
+        return;
+    }
+
+    const std::optional<std::filesystem::path> source_dir = default_palette_source_dir();
+    if (!source_dir) {
+        return;
+    }
+
+    seed_palette_files(dir, *source_dir, kInitialDefaultPaletteFiles, kInitialDefaultPaletteSeedMarker);
+    seed_palette_files(dir, *source_dir, kDefaultPaletteFilesAddedInV2, kDefaultPaletteSeedMarkerV2);
 }
 
 std::string trim(std::string value)

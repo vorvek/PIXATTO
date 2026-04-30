@@ -22,7 +22,7 @@ Pixelizer is a desktop image tool for turning PNG, JPG, and BMP files into pseud
 - Palette mapping or simpler per-channel color reduction
 - Preliminary single-bit transparency preservation with a special palette entry
 - Block pixelization with linear-light block averaging
-- Optional Bayer, deterministic blue-noise, Floyd-Steinberg, Jarvis-Judice-Ninke, Atkinson, or Riemersma dithering with percentage control and selectable Bayer pattern sizes
+- Optional ordered, blue-noise, error-diffusion, and Riemersma dithering with percentage control and selectable Bayer pattern sizes
 - Brightness, contrast, gamma, levels, saturation, and tint controls
 
 ## Downloads
