@@ -48,6 +48,9 @@ jobs:
       - name: Build
         run: cmake --build --preset ninja-release
 
+      - name: Strip binary
+        run: strip --strip-unneeded build/ninja-release/pixelizer.exe
+
       - name: Package
         shell: pwsh
         run: |
@@ -61,7 +64,6 @@ jobs:
           Copy-Item "THIRD_PARTY.md" $packageDir
           Copy-Item "LICENSE" $packageDir
           Copy-Item "assets" $packageDir -Recurse
-          & "C:\msys64\ucrt64\bin\strip.exe" --strip-unneeded (Join-Path $packageDir "pixelizer.exe")
 
           $assetPath = "dist/$packageName.zip"
           Compress-Archive -Path "$packageDir/*" -DestinationPath $assetPath -Force
