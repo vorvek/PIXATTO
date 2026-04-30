@@ -20,6 +20,7 @@ Pixelizer is a desktop image tool for turning PNG, JPG, and BMP files into pseud
 - Bundled Lospec default palettes that are seeded into the palette library on first launch and can still be deleted
 - Palettes are limited to 256 colors, whether imported or created in the app
 - Palette mapping or simpler per-channel color reduction
+- Preliminary single-bit transparency preservation with a special palette entry
 - Block pixelization with linear-light block averaging
 - Optional Bayer, deterministic blue-noise, Floyd-Steinberg, Jarvis-Judice-Ninke, Atkinson, or Riemersma dithering with percentage control and selectable Bayer pattern sizes
 - Brightness, contrast, gamma, levels, saturation, and tint controls
