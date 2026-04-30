@@ -1,16 +1,16 @@
 #pragma once
 
+#include "pixelizer/file_command_pump.hpp"
 #include "pixelizer/image.hpp"
-#include "pixelizer/image_processing.hpp"
 #include "pixelizer/localization.hpp"
 #include "pixelizer/palette.hpp"
+#include "pixelizer/processing_edit_session.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <array>
 #include <filesystem>
 #include <functional>
-#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -36,12 +36,6 @@ private:
         int height = 0;
     };
 
-    enum class DialogKind {
-        OpenImage,
-        ImportPalette,
-        ExportPng,
-    };
-
     enum class ViewportLayout {
         SideBySide,
         Stacked,
@@ -52,21 +46,7 @@ private:
         Split,
     };
 
-    struct PendingDialog {
-        DialogKind kind;
-        std::optional<std::string> path;
-        bool failed = false;
-        std::string error;
-    };
-
-    struct DialogState;
-    struct DialogPayload;
-    struct HistorySnapshot {
-        ProcessSettings settings;
-        int selected_palette = -1;
-
-        bool operator==(const HistorySnapshot&) const = default;
-    };
+    using HistorySnapshot = ProcessingEditSession::Snapshot;
     struct NumberEditState {
         std::string label;
         std::string format;
@@ -99,8 +79,6 @@ private:
         bool request_name_open = false;
     };
 
-    static void SDLCALL dialog_callback(void* userdata, const char* const* filelist, int filter);
-
     void shutdown();
     void process_events(bool& running);
     void render_frame();
@@ -125,8 +103,8 @@ private:
     void request_open_image();
     void request_import_palette();
     void request_export_png();
-    void handle_pending_dialogs();
-    void handle_dropped_file(const std::filesystem::path& path);
+    void drain_file_commands();
+    void handle_file_command(const FileCommand& command);
     void load_image_from_path(const std::filesystem::path& path);
     void import_palette_from_path(const std::filesystem::path& path);
     bool import_pending_palette(PaletteImportMode mode);
@@ -150,11 +128,11 @@ private:
         TextId id,
         std::initializer_list<std::pair<std::string_view, std::string_view>> values) const;
     [[nodiscard]] std::string imgui_label(TextId label, const char* id) const;
+    [[nodiscard]] FileDialogLabels file_dialog_labels() const;
     void normalize_settings();
     HistorySnapshot capture_history_snapshot() const;
     void record_control_history(const HistorySnapshot& before);
     void commit_history_change(const HistorySnapshot& before);
-    void apply_history_snapshot(const HistorySnapshot& snapshot);
     void undo();
     void redo();
     [[nodiscard]] bool can_undo() const noexcept;
@@ -172,10 +150,8 @@ private:
     Texture original_texture_;
     Texture result_texture_;
 
-    ProcessSettings settings_;
+    ProcessingEditSession edit_session_;
     std::vector<Palette> palettes_;
-    int selected_palette_ = -1;
-    bool preview_dirty_ = false;
 
     float original_zoom_ = 1.0F;
     float result_zoom_ = 1.0F;
@@ -194,15 +170,10 @@ private:
     std::optional<PendingPaletteImportState> pending_palette_import_;
     bool open_drop_confirm_ = false;
     bool open_delete_palette_confirm_ = false;
-    bool file_dialog_open_ = false;
-    std::optional<HistorySnapshot> active_edit_snapshot_;
+    FileCommandPump file_commands_;
     std::optional<NumberEditState> number_edit_;
     std::optional<PaletteColorEditState> palette_color_edit_;
     std::optional<PaletteSaveAsState> palette_save_as_;
-    std::vector<HistorySnapshot> undo_stack_;
-    std::vector<HistorySnapshot> redo_stack_;
-
-    std::shared_ptr<DialogState> dialog_state_;
 };
 
 } // namespace pixelizer

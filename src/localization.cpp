@@ -1,6 +1,12 @@
 #include "pixelizer/localization.hpp"
 
+#include <algorithm>
+#include <array>
+#include <span>
 #include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace pixelizer {
 namespace {
@@ -8,6 +14,11 @@ namespace {
 struct Translation {
     TextId id;
     const char* text;
+};
+
+struct TranslationTableView {
+    Language language;
+    std::span<const Translation> entries;
 };
 
 constexpr std::array<LanguageDefinition, kLanguageCount> kLanguages = {{
@@ -1713,7 +1724,81 @@ constexpr Translation kJapanese[] = {
 };
 
 template <std::size_t N>
-const char* find_translation(const Translation (&table)[N], TextId id)
+TranslationTableView table_view(Language language, const Translation (&entries)[N])
+{
+    return {language, std::span<const Translation>(entries, N)};
+}
+
+std::array<TranslationTableView, kLanguageCount> translation_tables()
+{
+    return {{
+        table_view(Language::English, kEnglish),
+        table_view(Language::Spanish, kSpanish),
+        table_view(Language::French, kFrench),
+        table_view(Language::German, kGerman),
+        table_view(Language::Danish, kDanish),
+        table_view(Language::Swedish, kSwedish),
+        table_view(Language::Norwegian, kNorwegian),
+        table_view(Language::Czech, kCzech),
+        table_view(Language::Italian, kItalian),
+        table_view(Language::Greek, kGreek),
+        table_view(Language::Polish, kPolish),
+        table_view(Language::Finnish, kFinnish),
+        table_view(Language::Ukrainian, kUkrainian),
+        table_view(Language::Russian, kRussian),
+        table_view(Language::ChineseSimplified, kChineseSimplified),
+        table_view(Language::ChineseTraditional, kChineseTraditional),
+        table_view(Language::Korean, kKorean),
+        table_view(Language::Japanese, kJapanese),
+    }};
+}
+
+std::span<const Translation> translations_for_language(Language language)
+{
+    switch (language) {
+    case Language::English:
+        return kEnglish;
+    case Language::Spanish:
+        return kSpanish;
+    case Language::French:
+        return kFrench;
+    case Language::German:
+        return kGerman;
+    case Language::Danish:
+        return kDanish;
+    case Language::Swedish:
+        return kSwedish;
+    case Language::Norwegian:
+        return kNorwegian;
+    case Language::Czech:
+        return kCzech;
+    case Language::Italian:
+        return kItalian;
+    case Language::Greek:
+        return kGreek;
+    case Language::Polish:
+        return kPolish;
+    case Language::Finnish:
+        return kFinnish;
+    case Language::Ukrainian:
+        return kUkrainian;
+    case Language::Russian:
+        return kRussian;
+    case Language::ChineseSimplified:
+        return kChineseSimplified;
+    case Language::ChineseTraditional:
+        return kChineseTraditional;
+    case Language::Korean:
+        return kKorean;
+    case Language::Japanese:
+        return kJapanese;
+    case Language::Count:
+        break;
+    }
+    return {};
+}
+
+const char* find_translation(std::span<const Translation> table, TextId id)
 {
     for (const Translation& translation : table) {
         if (translation.id == id) {
@@ -1725,47 +1810,223 @@ const char* find_translation(const Translation (&table)[N], TextId id)
 
 const char* find_localized_translation(Language language, TextId id)
 {
-    switch (language) {
-    case Language::English:
-        return find_translation(kEnglish, id);
-    case Language::Spanish:
-        return find_translation(kSpanish, id);
-    case Language::French:
-        return find_translation(kFrench, id);
-    case Language::German:
-        return find_translation(kGerman, id);
-    case Language::Danish:
-        return find_translation(kDanish, id);
-    case Language::Swedish:
-        return find_translation(kSwedish, id);
-    case Language::Norwegian:
-        return find_translation(kNorwegian, id);
-    case Language::Czech:
-        return find_translation(kCzech, id);
-    case Language::Italian:
-        return find_translation(kItalian, id);
-    case Language::Greek:
-        return find_translation(kGreek, id);
-    case Language::Polish:
-        return find_translation(kPolish, id);
-    case Language::Finnish:
-        return find_translation(kFinnish, id);
-    case Language::Ukrainian:
-        return find_translation(kUkrainian, id);
-    case Language::Russian:
-        return find_translation(kRussian, id);
-    case Language::ChineseSimplified:
-        return find_translation(kChineseSimplified, id);
-    case Language::ChineseTraditional:
-        return find_translation(kChineseTraditional, id);
-    case Language::Korean:
-        return find_translation(kKorean, id);
-    case Language::Japanese:
-        return find_translation(kJapanese, id);
-    case Language::Count:
-        break;
+    return find_translation(translations_for_language(language), id);
+}
+
+std::size_t language_index(Language language)
+{
+    return static_cast<std::size_t>(language);
+}
+
+std::size_t text_index(TextId id)
+{
+    return static_cast<std::size_t>(id);
+}
+
+void add_issue(
+    std::vector<TranslationCatalogIssue>& issues,
+    TranslationCatalogIssueKind kind,
+    Language language,
+    TextId id,
+    std::string message)
+{
+    issues.push_back({kind, language, id, std::move(message)});
+}
+
+std::vector<std::string> unique_sorted(std::vector<std::string> values)
+{
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end()), values.end());
+    return values;
+}
+
+std::vector<std::string> brace_placeholders(std::string_view text, bool& malformed)
+{
+    std::vector<std::string> placeholders;
+    for (std::size_t index = 0; index < text.size(); ++index) {
+        if (text[index] == '}') {
+            malformed = true;
+            continue;
+        }
+        if (text[index] != '{') {
+            continue;
+        }
+
+        const std::size_t close = text.find('}', index + 1U);
+        if (close == std::string_view::npos || close == index + 1U) {
+            malformed = true;
+            break;
+        }
+        placeholders.emplace_back(text.substr(index + 1U, close - index - 1U));
+        index = close;
     }
-    return nullptr;
+    return unique_sorted(std::move(placeholders));
+}
+
+std::vector<std::string> printf_placeholders(std::string_view text)
+{
+    constexpr std::string_view conversions = "diuoxXfFeEgGaAcspn";
+    std::vector<std::string> placeholders;
+
+    for (std::size_t index = 0; index < text.size(); ++index) {
+        if (text[index] != '%') {
+            continue;
+        }
+        if (index + 1U < text.size() && text[index + 1U] == '%') {
+            ++index;
+            continue;
+        }
+
+        const std::size_t start = index;
+        while (index + 1U < text.size()) {
+            ++index;
+            if (conversions.find(text[index]) != std::string_view::npos) {
+                break;
+            }
+        }
+        placeholders.emplace_back(text.substr(start, index - start + 1U));
+    }
+
+    return placeholders;
+}
+
+std::string id_message(TextId id, std::string_view message)
+{
+    return "TextId " + std::to_string(text_index(id)) + ": " + std::string(message);
+}
+
+void validate_language_definitions(std::vector<TranslationCatalogIssue>& issues)
+{
+    std::array<bool, kLanguageCount> seen{};
+    for (std::size_t index = 0; index < kLanguages.size(); ++index) {
+        const LanguageDefinition& definition = kLanguages[index];
+        const std::size_t actual = language_index(definition.language);
+        if (actual >= kLanguageCount) {
+            add_issue(
+                issues,
+                TranslationCatalogIssueKind::InvalidLanguageDefinition,
+                Language::English,
+                TextId::Count,
+                "language definition has invalid language id");
+            continue;
+        }
+        if (actual != index) {
+            add_issue(
+                issues,
+                TranslationCatalogIssueKind::InvalidLanguageDefinition,
+                definition.language,
+                TextId::Count,
+                "language definition order does not match Language enum");
+        }
+        if (seen[actual]) {
+            add_issue(
+                issues,
+                TranslationCatalogIssueKind::DuplicateLanguageDefinition,
+                definition.language,
+                TextId::Count,
+                "duplicate language definition");
+        }
+        seen[actual] = true;
+    }
+
+    for (std::size_t index = 0; index < seen.size(); ++index) {
+        if (!seen[index]) {
+            add_issue(
+                issues,
+                TranslationCatalogIssueKind::MissingLanguageDefinition,
+                static_cast<Language>(index),
+                TextId::Count,
+                "missing language definition");
+        }
+    }
+}
+
+void validate_table(
+    TranslationTableView table,
+    std::vector<TranslationCatalogIssue>& issues)
+{
+    std::array<bool, kTextCount> seen{};
+    for (const Translation& translation : table.entries) {
+        const std::size_t index = text_index(translation.id);
+        if (index >= kTextCount) {
+            add_issue(
+                issues,
+                TranslationCatalogIssueKind::InvalidTextId,
+                table.language,
+                translation.id,
+                "translation has invalid TextId");
+            continue;
+        }
+        if (seen[index]) {
+            add_issue(
+                issues,
+                TranslationCatalogIssueKind::DuplicateText,
+                table.language,
+                translation.id,
+                id_message(translation.id, "duplicate translation"));
+        }
+        seen[index] = true;
+
+        if (!translation.text || translation.text[0] == '\0') {
+            add_issue(
+                issues,
+                TranslationCatalogIssueKind::EmptyText,
+                table.language,
+                translation.id,
+                id_message(translation.id, "translation is empty"));
+            continue;
+        }
+
+        bool malformed = false;
+        const std::vector<std::string> placeholders = brace_placeholders(translation.text, malformed);
+        if (malformed) {
+            add_issue(
+                issues,
+                TranslationCatalogIssueKind::MalformedPlaceholder,
+                table.language,
+                translation.id,
+                id_message(translation.id, "translation has malformed brace placeholders"));
+        }
+
+        const char* english = find_translation(kEnglish, translation.id);
+        if (!english || table.language == Language::English) {
+            continue;
+        }
+
+        bool english_malformed = false;
+        if (placeholders != brace_placeholders(english, english_malformed)) {
+            add_issue(
+                issues,
+                TranslationCatalogIssueKind::PlaceholderMismatch,
+                table.language,
+                translation.id,
+                id_message(translation.id, "brace placeholders do not match English"));
+        }
+
+        if (printf_placeholders(translation.text) != printf_placeholders(english)) {
+            add_issue(
+                issues,
+                TranslationCatalogIssueKind::PrintfPlaceholderMismatch,
+                table.language,
+                translation.id,
+                id_message(translation.id, "printf placeholders do not match English"));
+        }
+    }
+
+    if (table.language != Language::English) {
+        return;
+    }
+
+    for (std::size_t index = 0; index < seen.size(); ++index) {
+        if (!seen[index]) {
+            add_issue(
+                issues,
+                TranslationCatalogIssueKind::MissingEnglishText,
+                Language::English,
+                static_cast<TextId>(index),
+                id_message(static_cast<TextId>(index), "missing English translation"));
+        }
+    }
 }
 
 void replace_all(std::string& value, std::string_view from, std::string_view to)
@@ -1806,6 +2067,16 @@ const char* translate(Language language, TextId id)
         return english;
     }
     return "";
+}
+
+std::vector<TranslationCatalogIssue> validate_translation_catalog()
+{
+    std::vector<TranslationCatalogIssue> issues;
+    validate_language_definitions(issues);
+    for (const TranslationTableView table : translation_tables()) {
+        validate_table(table, issues);
+    }
+    return issues;
 }
 
 std::string format_translation(

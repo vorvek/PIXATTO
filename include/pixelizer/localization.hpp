@@ -5,6 +5,7 @@
 #include <initializer_list>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace pixelizer {
 
@@ -177,12 +178,33 @@ enum class TextId {
     Count,
 };
 
+enum class TranslationCatalogIssueKind {
+    InvalidLanguageDefinition,
+    MissingLanguageDefinition,
+    DuplicateLanguageDefinition,
+    InvalidTextId,
+    MissingEnglishText,
+    DuplicateText,
+    EmptyText,
+    MalformedPlaceholder,
+    PlaceholderMismatch,
+    PrintfPlaceholderMismatch,
+};
+
+struct TranslationCatalogIssue {
+    TranslationCatalogIssueKind kind;
+    Language language = Language::English;
+    TextId id = TextId::Count;
+    std::string message;
+};
+
 constexpr std::size_t kLanguageCount = static_cast<std::size_t>(Language::Count);
 constexpr std::size_t kTextCount = static_cast<std::size_t>(TextId::Count);
 
 const std::array<LanguageDefinition, kLanguageCount>& language_definitions();
 const LanguageDefinition& language_definition(Language language);
 const char* translate(Language language, TextId id);
+[[nodiscard]] std::vector<TranslationCatalogIssue> validate_translation_catalog();
 std::string format_translation(
     Language language,
     TextId id,

@@ -1,9 +1,12 @@
 build/
+dist/
 out/
 .vs/
 .vscode/
 CMakeUserPresets.json
 imgui.ini
+CONTEXT.md
+docs/itchio-*
 *.user
 *.suo
 *.log

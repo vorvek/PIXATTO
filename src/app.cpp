@@ -1,7 +1,5 @@
 #include "pixelizer/app.hpp"
 
-#include <SDL3/SDL_dialog.h>
-
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlrenderer3.h>
@@ -16,8 +14,6 @@
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
-#include <memory>
-#include <mutex>
 #include <utility>
 
 namespace pixelizer {
@@ -25,7 +21,6 @@ namespace {
 
 constexpr int kInitialWidth = 1440;
 constexpr int kInitialHeight = 900;
-constexpr std::size_t kMaxHistoryEntries = 100;
 constexpr float kViewportSplitterThickness = 8.0F;
 constexpr float kViewportMinimumPaneSize = 180.0F;
 constexpr const char* kLospecPaletteCredits[] = {
@@ -108,19 +103,6 @@ std::string ensure_png_extension(std::filesystem::path path)
         path.replace_extension(".png");
     }
     return path.string();
-}
-
-std::string lowercase(std::string value)
-{
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    return value;
-}
-
-bool has_extension(const std::filesystem::path& path, const char* extension)
-{
-    return lowercase(path.extension().string()) == extension;
 }
 
 float fit_zoom_for_size(int width, int height, ImVec2 available)
@@ -572,18 +554,7 @@ void set_window_icon(SDL_Window* window)
 
 } // namespace
 
-struct App::DialogState {
-    std::mutex mutex;
-    std::vector<PendingDialog> pending_dialogs;
-};
-
-struct App::DialogPayload {
-    std::weak_ptr<DialogState> state;
-    DialogKind kind;
-};
-
 App::App()
-    : dialog_state_(std::make_shared<DialogState>())
 {
     status_ = text(TextId::StatusOpenImageToBegin);
 }
@@ -640,7 +611,7 @@ int App::run()
     running_ = true;
     while (running_) {
         process_events(running_);
-        handle_pending_dialogs();
+        drain_file_commands();
         update_preview_if_needed();
         render_frame();
     }
@@ -684,8 +655,8 @@ void App::process_events(bool& running)
         if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(window_)) {
             running = false;
         }
-        if (!file_dialog_open_ && event.type == SDL_EVENT_DROP_FILE && event.drop.data) {
-            handle_dropped_file(event.drop.data);
+        if (!file_commands_.dialog_open() && event.type == SDL_EVENT_DROP_FILE && event.drop.data) {
+            file_commands_.submit_drop(event.drop.data, !original_.empty());
         }
     }
 }
@@ -708,7 +679,7 @@ void App::render_frame()
         | ImGuiWindowFlags_NoMove
         | ImGuiWindowFlags_NoSavedSettings
         | ImGuiWindowFlags_NoBringToFrontOnFocus;
-    const bool disable_workspace = file_dialog_open_;
+    const bool disable_workspace = file_commands_.dialog_open();
     ImGui::Begin("Pixelizer Workspace", nullptr, flags);
     if (disable_workspace) {
         ImGui::BeginDisabled();
@@ -754,7 +725,7 @@ void App::render_menu_bar()
         return;
     }
 
-    const bool disable_menu = file_dialog_open_;
+    const bool disable_menu = file_commands_.dialog_open();
     if (disable_menu) {
         ImGui::BeginDisabled();
     }
@@ -971,21 +942,20 @@ void App::render_about_dialog()
 
 void App::render_controls()
 {
-    const HistorySnapshot before = capture_history_snapshot();
+    auto edit = edit_session_.begin_edit();
+    ProcessSettings& settings = edit.settings();
+    int& selected_palette = edit.selected_palette();
 
     ImGui::TextUnformatted(text(TextId::Pixelize));
     ImGui::Separator();
 
-    if (slider_int_direct(TextId::PixelSize, "PixelSize", settings_.pixel_size, 1, 128)) {
-        mark_dirty();
-    }
+    slider_int_direct(TextId::PixelSize, "PixelSize", settings.pixel_size, 1, 128);
 
-    if (ImGui::BeginCombo(imgui_label(TextId::BlockSample, "BlockSample").c_str(), text(block_mode_label(settings_.block_color_mode)))) {
+    if (ImGui::BeginCombo(imgui_label(TextId::BlockSample, "BlockSample").c_str(), text(block_mode_label(settings.block_color_mode)))) {
         for (BlockColorMode mode : {BlockColorMode::WeightedAverage, BlockColorMode::Average}) {
-            const bool selected = settings_.block_color_mode == mode;
+            const bool selected = settings.block_color_mode == mode;
             if (ImGui::Selectable(text(block_mode_label(mode)), selected)) {
-                settings_.block_color_mode = mode;
-                mark_dirty();
+                settings.block_color_mode = mode;
             }
             if (selected) {
                 ImGui::SetItemDefaultFocus();
@@ -1006,38 +976,32 @@ void App::render_controls()
         + preserve_transparency_width
         <= ImGui::GetContentRegionAvail().x;
 
-    if (ImGui::Checkbox(imgui_label(TextId::UsePalette, "UsePalette").c_str(), &settings_.use_palette)) {
-        mark_dirty();
-    }
+    ImGui::Checkbox(imgui_label(TextId::UsePalette, "UsePalette").c_str(), &settings.use_palette);
     if (place_transparency_same_line) {
         ImGui::SameLine();
     }
-    if (ImGui::Checkbox(imgui_label(TextId::PreserveTransparency, "PreserveTransparency").c_str(), &settings_.preserve_transparency)) {
-        mark_dirty();
-    }
+    ImGui::Checkbox(imgui_label(TextId::PreserveTransparency, "PreserveTransparency").c_str(), &settings.preserve_transparency);
 
-    if (settings_.use_palette) {
-        if (selected_palette_ >= static_cast<int>(palettes_.size())) {
-            selected_palette_ = -1;
+    if (settings.use_palette) {
+        if (selected_palette >= static_cast<int>(palettes_.size())) {
+            selected_palette = -1;
         }
-        if (!palettes_.empty() && selected_palette_ < 0 && settings_.palette.empty()) {
-            selected_palette_ = 0;
-            settings_.palette = palettes_[0].colors;
-            mark_dirty();
+        if (!palettes_.empty() && selected_palette < 0 && settings.palette.empty()) {
+            selected_palette = 0;
+            settings.palette = palettes_[0].colors;
         }
 
-        const bool has_saved_selection = selected_palette_ >= 0 && selected_palette_ < static_cast<int>(palettes_.size());
+        const bool has_saved_selection = selected_palette >= 0 && selected_palette < static_cast<int>(palettes_.size());
         if (palettes_.empty()) {
             ImGui::TextDisabled("%s", text(TextId::NoPalettesSaved));
         } else {
-            const char* preview = has_saved_selection ? palettes_[static_cast<std::size_t>(selected_palette_)].name.c_str() : text(TextId::UnsavedPalette);
+            const char* preview = has_saved_selection ? palettes_[static_cast<std::size_t>(selected_palette)].name.c_str() : text(TextId::UnsavedPalette);
             if (ImGui::BeginCombo(imgui_label(TextId::Palette, "Palette").c_str(), preview)) {
                 for (int i = 0; i < static_cast<int>(palettes_.size()); ++i) {
-                    const bool selected = selected_palette_ == i;
+                    const bool selected = selected_palette == i;
                     if (ImGui::Selectable(palettes_[static_cast<std::size_t>(i)].name.c_str(), selected)) {
-                        selected_palette_ = i;
-                        settings_.palette = palettes_[static_cast<std::size_t>(i)].colors;
-                        mark_dirty();
+                        selected_palette = i;
+                        settings.palette = palettes_[static_cast<std::size_t>(i)].colors;
                     }
                     if (selected) {
                         ImGui::SetItemDefaultFocus();
@@ -1052,7 +1016,7 @@ void App::render_controls()
         }
         ImGui::SameLine();
 
-        const bool can_save = has_saved_selection && !settings_.palette.empty();
+        const bool can_save = has_saved_selection && !settings.palette.empty();
         if (!can_save) {
             ImGui::BeginDisabled();
         }
@@ -1064,7 +1028,7 @@ void App::render_controls()
         }
         ImGui::SameLine();
 
-        const bool can_save_new = !settings_.palette.empty();
+        const bool can_save_new = !settings.palette.empty();
         if (!can_save_new) {
             ImGui::BeginDisabled();
         }
@@ -1082,28 +1046,28 @@ void App::render_controls()
         }
 
         ImGui::Spacing();
-        const bool show_transparency_swatch = settings_.preserve_transparency;
-        const std::size_t displayed_palette_count = settings_.palette.size() + (show_transparency_swatch ? 1U : 0U);
+        const bool show_transparency_swatch = settings.preserve_transparency;
+        const std::size_t displayed_palette_count = settings.palette.size() + (show_transparency_swatch ? 1U : 0U);
         ImGui::Text(text(TextId::PaletteCountFormat), displayed_palette_count, kMaxPaletteColors);
         if (show_transparency_swatch) {
             ImGui::SameLine();
             ImGui::TextUnformatted("(*)");
         }
-        if (settings_.palette.empty()) {
+        if (settings.palette.empty()) {
             ImGui::TextDisabled("%s", text(TextId::AddColorToBegin));
         }
 
         const float swatch = 16.0F;
         const float start_x = ImGui::GetCursorScreenPos().x;
         const float max_x = start_x + ImGui::GetContentRegionAvail().x;
-        const bool can_add_palette_color = settings_.palette.size() < kMaxPaletteColors;
+        const bool can_add_palette_color = settings.palette.size() < kMaxPaletteColors;
         const auto continue_palette_swatch_row = [&](bool has_more) {
             if (has_more && ImGui::GetItemRectMax().x + swatch + ImGui::GetStyle().ItemSpacing.x < max_x) {
                 ImGui::SameLine();
             }
         };
-        for (std::size_t color_index = 0; color_index < settings_.palette.size(); ++color_index) {
-            const Color32 color = settings_.palette[color_index];
+        for (std::size_t color_index = 0; color_index < settings.palette.size(); ++color_index) {
+            const Color32 color = settings.palette[color_index];
             ImGui::PushID(static_cast<int>(color_index));
             if (ImGui::ColorButton("swatch", color_to_imgui(color), ImGuiColorEditFlags_NoTooltip, ImVec2(swatch, swatch))) {
                 request_edit_palette_color(color_index);
@@ -1113,7 +1077,7 @@ void App::render_controls()
                 ImGui::SetTooltip("%s", tooltip.c_str());
             }
             ImGui::PopID();
-            const bool has_more = color_index + 1U < settings_.palette.size() || show_transparency_swatch || can_add_palette_color;
+            const bool has_more = color_index + 1U < settings.palette.size() || show_transparency_swatch || can_add_palette_color;
             continue_palette_swatch_row(has_more);
         }
 
@@ -1134,18 +1098,16 @@ void App::render_controls()
             }
         }
     } else {
-        if (slider_int_direct(TextId::MaxColors, "MaxColors", settings_.reduction_max_colors, 0, 256)) {
-            mark_dirty();
-        }
-        if (settings_.reduction_max_colors == 0 && slider_int_direct(TextId::ColorLevels, "ColorLevels", settings_.color_levels, 2, 64)) {
-            mark_dirty();
+        slider_int_direct(TextId::MaxColors, "MaxColors", settings.reduction_max_colors, 0, 256);
+        if (settings.reduction_max_colors == 0) {
+            slider_int_direct(TextId::ColorLevels, "ColorLevels", settings.color_levels, 2, 64);
         }
     }
 
     ImGui::Spacing();
     ImGui::TextUnformatted(text(TextId::Dithering));
     ImGui::Separator();
-    if (ImGui::BeginCombo(imgui_label(TextId::Mode, "DitherMode").c_str(), text(dither_label(settings_.dither_mode)))) {
+    if (ImGui::BeginCombo(imgui_label(TextId::Mode, "DitherMode").c_str(), text(dither_label(settings.dither_mode)))) {
         for (DitherMode mode : {
                  DitherMode::None,
                  DitherMode::Bayer,
@@ -1155,10 +1117,9 @@ void App::render_controls()
                  DitherMode::Atkinson,
                  DitherMode::Riemersma,
             }) {
-            const bool selected = settings_.dither_mode == mode;
+            const bool selected = settings.dither_mode == mode;
             if (ImGui::Selectable(text(dither_label(mode)), selected)) {
-                settings_.dither_mode = mode;
-                mark_dirty();
+                settings.dither_mode = mode;
             }
             if (selected) {
                 ImGui::SetItemDefaultFocus();
@@ -1167,13 +1128,12 @@ void App::render_controls()
         ImGui::EndCombo();
     }
 
-    if (settings_.dither_mode == DitherMode::Bayer) {
-        if (ImGui::BeginCombo(imgui_label(TextId::Pattern, "BayerPattern").c_str(), bayer_pattern_label(settings_.bayer_matrix_size))) {
+    if (settings.dither_mode == DitherMode::Bayer) {
+        if (ImGui::BeginCombo(imgui_label(TextId::Pattern, "BayerPattern").c_str(), bayer_pattern_label(settings.bayer_matrix_size))) {
             for (int size : {2, 4, 8, 16}) {
-                const bool selected = settings_.bayer_matrix_size == size;
+                const bool selected = settings.bayer_matrix_size == size;
                 if (ImGui::Selectable(bayer_pattern_label(size), selected)) {
-                    settings_.bayer_matrix_size = size;
-                    mark_dirty();
+                    settings.bayer_matrix_size = size;
                 }
                 if (selected) {
                     ImGui::SetItemDefaultFocus();
@@ -1183,67 +1143,57 @@ void App::render_controls()
         }
     }
 
-    float dither_percent = settings_.dither_amount * 100.0F;
-    if (slider_float_direct_value(TextId::Amount, "DitherAmount", dither_percent, 0.0F, 100.0F, "%.0f%%", [this](float value) {
-            settings_.dither_amount = value / 100.0F;
-        })) {
-        mark_dirty();
-    }
+    float dither_percent = settings.dither_amount * 100.0F;
+    float* dither_amount = &settings.dither_amount;
+    slider_float_direct_value(
+        TextId::Amount,
+        "DitherAmount",
+        dither_percent,
+        0.0F,
+        100.0F,
+        "%.0f%%",
+        [dither_amount](float value) {
+            *dither_amount = value / 100.0F;
+        });
 
     ImGui::Spacing();
     ImGui::TextUnformatted(text(TextId::Adjustments));
     ImGui::Separator();
-    if (slider_float_direct(TextId::Brightness, "Brightness", settings_.adjustments.brightness, -1.0F, 1.0F, "%.2f")) {
-        mark_dirty();
+    slider_float_direct(TextId::Brightness, "Brightness", settings.adjustments.brightness, -1.0F, 1.0F, "%.2f");
+    slider_float_direct(TextId::Contrast, "Contrast", settings.adjustments.contrast, -1.0F, 1.0F, "%.2f");
+    slider_float_direct(TextId::Gamma, "Gamma", settings.adjustments.gamma, 0.1F, 4.0F, "%.2f");
+    slider_float_direct(TextId::Saturation, "Saturation", settings.adjustments.saturation, 0.0F, 2.5F, "%.2f");
+    if (slider_float_direct(TextId::InputBlack, "InputBlack", settings.adjustments.input_black, 0.0F, 0.95F, "%.2f")) {
+        settings.adjustments.input_black = std::min(settings.adjustments.input_black, settings.adjustments.input_white - 0.01F);
     }
-    if (slider_float_direct(TextId::Contrast, "Contrast", settings_.adjustments.contrast, -1.0F, 1.0F, "%.2f")) {
-        mark_dirty();
+    if (slider_float_direct(TextId::InputWhite, "InputWhite", settings.adjustments.input_white, 0.05F, 1.0F, "%.2f")) {
+        settings.adjustments.input_white = std::max(settings.adjustments.input_white, settings.adjustments.input_black + 0.01F);
     }
-    if (slider_float_direct(TextId::Gamma, "Gamma", settings_.adjustments.gamma, 0.1F, 4.0F, "%.2f")) {
-        mark_dirty();
+    if (slider_float_direct(TextId::OutputBlack, "OutputBlack", settings.adjustments.output_black, 0.0F, 0.95F, "%.2f")) {
+        settings.adjustments.output_black = std::min(settings.adjustments.output_black, settings.adjustments.output_white - 0.01F);
     }
-    if (slider_float_direct(TextId::Saturation, "Saturation", settings_.adjustments.saturation, 0.0F, 2.5F, "%.2f")) {
-        mark_dirty();
-    }
-    if (slider_float_direct(TextId::InputBlack, "InputBlack", settings_.adjustments.input_black, 0.0F, 0.95F, "%.2f")) {
-        settings_.adjustments.input_black = std::min(settings_.adjustments.input_black, settings_.adjustments.input_white - 0.01F);
-        mark_dirty();
-    }
-    if (slider_float_direct(TextId::InputWhite, "InputWhite", settings_.adjustments.input_white, 0.05F, 1.0F, "%.2f")) {
-        settings_.adjustments.input_white = std::max(settings_.adjustments.input_white, settings_.adjustments.input_black + 0.01F);
-        mark_dirty();
-    }
-    if (slider_float_direct(TextId::OutputBlack, "OutputBlack", settings_.adjustments.output_black, 0.0F, 0.95F, "%.2f")) {
-        settings_.adjustments.output_black = std::min(settings_.adjustments.output_black, settings_.adjustments.output_white - 0.01F);
-        mark_dirty();
-    }
-    if (slider_float_direct(TextId::OutputWhite, "OutputWhite", settings_.adjustments.output_white, 0.05F, 1.0F, "%.2f")) {
-        settings_.adjustments.output_white = std::max(settings_.adjustments.output_white, settings_.adjustments.output_black + 0.01F);
-        mark_dirty();
+    if (slider_float_direct(TextId::OutputWhite, "OutputWhite", settings.adjustments.output_white, 0.05F, 1.0F, "%.2f")) {
+        settings.adjustments.output_white = std::max(settings.adjustments.output_white, settings.adjustments.output_black + 0.01F);
     }
 
     float tint[3] = {
-        settings_.adjustments.tint.r / 255.0F,
-        settings_.adjustments.tint.g / 255.0F,
-        settings_.adjustments.tint.b / 255.0F,
+        settings.adjustments.tint.r / 255.0F,
+        settings.adjustments.tint.g / 255.0F,
+        settings.adjustments.tint.b / 255.0F,
     };
     if (ImGui::ColorEdit3(imgui_label(TextId::Tint, "Tint").c_str(), tint, ImGuiColorEditFlags_NoInputs)) {
-        settings_.adjustments.tint.r = static_cast<std::uint8_t>(std::lround(std::clamp(tint[0], 0.0F, 1.0F) * 255.0F));
-        settings_.adjustments.tint.g = static_cast<std::uint8_t>(std::lround(std::clamp(tint[1], 0.0F, 1.0F) * 255.0F));
-        settings_.adjustments.tint.b = static_cast<std::uint8_t>(std::lround(std::clamp(tint[2], 0.0F, 1.0F) * 255.0F));
-        mark_dirty();
+        settings.adjustments.tint.r = static_cast<std::uint8_t>(std::lround(std::clamp(tint[0], 0.0F, 1.0F) * 255.0F));
+        settings.adjustments.tint.g = static_cast<std::uint8_t>(std::lround(std::clamp(tint[1], 0.0F, 1.0F) * 255.0F));
+        settings.adjustments.tint.b = static_cast<std::uint8_t>(std::lround(std::clamp(tint[2], 0.0F, 1.0F) * 255.0F));
     }
-    if (slider_float_direct(TextId::TintStrength, "TintStrength", settings_.adjustments.tint_strength, 0.0F, 1.0F, "%.2f")) {
-        mark_dirty();
-    }
+    slider_float_direct(TextId::TintStrength, "TintStrength", settings.adjustments.tint_strength, 0.0F, 1.0F, "%.2f");
 
     ImGui::Spacing();
     if (ImGui::Button(imgui_label(TextId::ResetAdjustments, "ResetAdjustments").c_str())) {
-        settings_.adjustments = {};
-        mark_dirty();
+        settings.adjustments = {};
     }
 
-    record_control_history(before);
+    record_control_history(edit.before());
 }
 
 void App::render_viewports()
@@ -1625,10 +1575,10 @@ void App::render_palette_color_popup()
         const bool adding = palette_color_edit_->adding;
         if (ImGui::Button(imgui_label(adding ? TextId::Add : TextId::Apply, "ApplyPaletteColor").c_str())) {
             if (adding) {
-                if (settings_.palette.size() >= kMaxPaletteColors) {
+                if (edit_session_.settings_for_edit().palette.size() >= kMaxPaletteColors) {
                     set_status(text(TextId::StatusPaletteFull));
                 } else {
-                    settings_.palette.push_back(color_from_rgb_floats(palette_color_edit_->color));
+                    edit_session_.settings_for_edit().palette.push_back(color_from_rgb_floats(palette_color_edit_->color));
                     mark_dirty();
                     commit_history_change(palette_color_edit_->before);
                     set_status(text(TextId::StatusAddedColor));
@@ -1637,10 +1587,10 @@ void App::render_palette_color_popup()
                 }
             } else {
                 const int index = palette_color_edit_->index;
-                if (index < 0 || index >= static_cast<int>(settings_.palette.size())) {
+                if (index < 0 || index >= static_cast<int>(edit_session_.settings_for_edit().palette.size())) {
                     set_status(text(TextId::StatusPaletteColorMissing));
                 } else {
-                    settings_.palette[static_cast<std::size_t>(index)] = color_from_rgb_floats(palette_color_edit_->color);
+                    edit_session_.settings_for_edit().palette[static_cast<std::size_t>(index)] = color_from_rgb_floats(palette_color_edit_->color);
                     mark_dirty();
                     commit_history_change(palette_color_edit_->before);
                     set_status(text(TextId::StatusUpdatedColor));
@@ -1653,12 +1603,12 @@ void App::render_palette_color_popup()
         ImGui::SameLine();
         const bool can_delete = !palette_color_edit_->adding
             && palette_color_edit_->index >= 0
-            && palette_color_edit_->index < static_cast<int>(settings_.palette.size());
+            && palette_color_edit_->index < static_cast<int>(edit_session_.settings_for_edit().palette.size());
         if (!can_delete) {
             ImGui::BeginDisabled();
         }
         if (ImGui::Button(imgui_label(TextId::DeleteColor, "DeletePaletteColor").c_str())) {
-            settings_.palette.erase(settings_.palette.begin() + palette_color_edit_->index);
+            edit_session_.settings_for_edit().palette.erase(edit_session_.settings_for_edit().palette.begin() + palette_color_edit_->index);
             mark_dirty();
             commit_history_change(palette_color_edit_->before);
             set_status(text(TextId::StatusDeletedColor));
@@ -1735,7 +1685,7 @@ void App::render_save_palette_popup()
 void App::handle_shortcuts()
 {
     ImGuiIO& io = ImGui::GetIO();
-    if (file_dialog_open_ || number_edit_ || palette_color_edit_ || palette_save_as_ || pending_palette_import_
+    if (file_commands_.dialog_open() || number_edit_ || palette_color_edit_ || palette_save_as_ || pending_palette_import_
         || io.WantTextInput || !io.KeyCtrl || !ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
         return;
     }
@@ -1749,14 +1699,14 @@ void App::handle_shortcuts()
 
 void App::update_preview_if_needed()
 {
-    if (!preview_dirty_ || original_.empty()) {
+    if (!edit_session_.preview_dirty() || original_.empty()) {
         return;
     }
 
     const auto started = std::chrono::steady_clock::now();
-    result_ = process_image(original_, settings_);
+    result_ = process_image(original_, edit_session_.settings());
     rebuild_texture(result_texture_, result_, true);
-    preview_dirty_ = false;
+    edit_session_.clear_preview_dirty();
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
     status_ = textf(TextId::StatusPreviewUpdatedFormat, {{"ms", std::to_string(elapsed)}});
@@ -1861,134 +1811,48 @@ void App::destroy_texture(Texture& texture)
 
 void App::request_open_image()
 {
-    if (file_dialog_open_) {
-        return;
-    }
-
-    static std::array<SDL_DialogFileFilter, 2> filters;
-    filters = {{
-        {text(TextId::ImagesFilter), "png;jpg;jpeg;bmp"},
-        {text(TextId::AllFilesFilter), "*"},
-    }};
-    file_dialog_open_ = true;
-    auto* payload = new DialogPayload{dialog_state_, DialogKind::OpenImage};
-    SDL_ShowOpenFileDialog(dialog_callback, payload, window_, filters.data(), static_cast<int>(filters.size()), nullptr, false);
+    (void)file_commands_.request_open_image_dialog(window_, file_dialog_labels());
 }
 
 void App::request_import_palette()
 {
-    if (file_dialog_open_) {
-        return;
-    }
-
-    static std::array<SDL_DialogFileFilter, 2> filters;
-    filters = {{
-        {text(TextId::LospecPalettesFilter), "hex"},
-        {text(TextId::AllFilesFilter), "*"},
-    }};
-    file_dialog_open_ = true;
-    auto* payload = new DialogPayload{dialog_state_, DialogKind::ImportPalette};
-    SDL_ShowOpenFileDialog(dialog_callback, payload, window_, filters.data(), static_cast<int>(filters.size()), nullptr, false);
+    (void)file_commands_.request_import_palette_dialog(window_, file_dialog_labels());
 }
 
 void App::request_export_png()
 {
-    if (file_dialog_open_) {
-        return;
-    }
-
-    static std::array<SDL_DialogFileFilter, 1> filters;
-    filters = {{
-        {text(TextId::PngImageFilter), "png"},
-    }};
-    file_dialog_open_ = true;
-    auto* payload = new DialogPayload{dialog_state_, DialogKind::ExportPng};
-    SDL_ShowSaveFileDialog(dialog_callback, payload, window_, filters.data(), static_cast<int>(filters.size()), nullptr);
+    (void)file_commands_.request_export_png_dialog(window_, file_dialog_labels());
 }
 
-void App::dialog_callback(void* userdata, const char* const* filelist, int)
+void App::drain_file_commands()
 {
-    std::unique_ptr<DialogPayload> payload(static_cast<DialogPayload*>(userdata));
-    if (!payload) {
-        return;
-    }
-
-    auto state = payload->state.lock();
-    if (!state) {
-        return;
-    }
-
-    PendingDialog dialog;
-    dialog.kind = payload->kind;
-    if (!filelist) {
-        dialog.failed = true;
-        if (const char* error = SDL_GetError(); error && *error != '\0') {
-            dialog.error = error;
-        }
-    } else if (filelist[0]) {
-        dialog.path = filelist[0];
-    }
-
-    std::lock_guard<std::mutex> lock(state->mutex);
-    state->pending_dialogs.push_back(std::move(dialog));
-}
-
-void App::handle_pending_dialogs()
-{
-    std::vector<PendingDialog> dialogs;
-    auto state = dialog_state_;
-    if (!state) {
-        return;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(state->mutex);
-        dialogs.swap(state->pending_dialogs);
-    }
-
-    for (const PendingDialog& dialog : dialogs) {
-        file_dialog_open_ = false;
-        if (dialog.failed) {
-            const std::string error = dialog.error.empty() ? "unknown error" : dialog.error;
-            set_status(textf(TextId::StatusFileDialogFailedFormat, {{"error", error}}));
-            continue;
-        }
-        if (!dialog.path) {
-            continue;
-        }
-
-        switch (dialog.kind) {
-        case DialogKind::OpenImage:
-            load_image_from_path(*dialog.path);
-            break;
-        case DialogKind::ImportPalette:
-            import_palette_from_path(*dialog.path);
-            break;
-        case DialogKind::ExportPng:
-            export_result_to_path(*dialog.path);
-            break;
-        }
+    for (const FileCommand& command : file_commands_.drain_commands()) {
+        handle_file_command(command);
     }
 }
 
-void App::handle_dropped_file(const std::filesystem::path& path)
+void App::handle_file_command(const FileCommand& command)
 {
-    if (path.empty()) {
-        return;
+    switch (command.kind) {
+    case FileCommandKind::OpenImage:
+        load_image_from_path(command.path);
+        break;
+    case FileCommandKind::ImportPalette:
+        import_palette_from_path(command.path);
+        break;
+    case FileCommandKind::ExportPng:
+        export_result_to_path(command.path);
+        break;
+    case FileCommandKind::ConfirmOpenImage:
+        pending_dropped_image_ = command.path;
+        open_drop_confirm_ = true;
+        break;
+    case FileCommandKind::DialogFailed: {
+        const std::string error = command.error.empty() ? "unknown error" : command.error;
+        set_status(textf(TextId::StatusFileDialogFailedFormat, {{"error", error}}));
+        break;
     }
-
-    if (has_extension(path, ".hex")) {
-        import_palette_from_path(path);
-        return;
     }
-
-    if (original_.empty()) {
-        load_image_from_path(path);
-        return;
-    }
-
-    pending_dropped_image_ = path;
-    open_drop_confirm_ = true;
 }
 
 void App::load_image_from_path(const std::filesystem::path& path)
@@ -2074,10 +1938,10 @@ void App::finish_palette_import(const Palette& palette, TextId message)
     const HistorySnapshot before = capture_history_snapshot();
     refresh_palettes();
     if (!select_palette_by_path(palette.path)) {
-        selected_palette_ = -1;
-        settings_.palette = palette.colors;
+        edit_session_.selected_palette_for_edit() = -1;
+        edit_session_.settings_for_edit().palette = palette.colors;
     }
-    settings_.use_palette = true;
+    edit_session_.settings_for_edit().use_palette = true;
     mark_dirty();
     commit_history_change(before);
     set_status(textf(message, {{"name", palette.name}}));
@@ -2085,9 +1949,9 @@ void App::finish_palette_import(const Palette& palette, TextId message)
 
 void App::request_new_palette()
 {
-    selected_palette_ = -1;
-    settings_.use_palette = true;
-    settings_.palette = {
+    edit_session_.selected_palette_for_edit() = -1;
+    edit_session_.settings_for_edit().use_palette = true;
+    edit_session_.settings_for_edit().palette = {
         Color32{8, 10, 14, 255},
         Color32{238, 142, 45, 255},
     };
@@ -2097,15 +1961,15 @@ void App::request_new_palette()
 
 void App::request_add_palette_color()
 {
-    if (settings_.palette.size() >= kMaxPaletteColors) {
+    if (edit_session_.settings_for_edit().palette.size() >= kMaxPaletteColors) {
         set_status(text(TextId::StatusPaletteFull));
         return;
     }
 
-    const Color32 seed = settings_.palette.empty() ? Color32{255, 255, 255, 255} : settings_.palette.back();
-    active_edit_snapshot_.reset();
+    const Color32 seed = edit_session_.settings_for_edit().palette.empty() ? Color32{255, 255, 255, 255} : edit_session_.settings_for_edit().palette.back();
+    edit_session_.cancel_live_edit();
     palette_color_edit_ = PaletteColorEditState{
-        static_cast<int>(settings_.palette.size()),
+        static_cast<int>(edit_session_.settings_for_edit().palette.size()),
         true,
         true,
         color_to_rgb_floats(seed),
@@ -2115,31 +1979,31 @@ void App::request_add_palette_color()
 
 void App::request_edit_palette_color(std::size_t index)
 {
-    if (index >= settings_.palette.size()) {
+    if (index >= edit_session_.settings_for_edit().palette.size()) {
         set_status(text(TextId::StatusPaletteColorMissing));
         return;
     }
 
-    active_edit_snapshot_.reset();
+    edit_session_.cancel_live_edit();
     palette_color_edit_ = PaletteColorEditState{
         static_cast<int>(index),
         false,
         true,
-        color_to_rgb_floats(settings_.palette[index]),
+        color_to_rgb_floats(edit_session_.settings_for_edit().palette[index]),
         capture_history_snapshot(),
     };
 }
 
 void App::request_save_palette()
 {
-    if (selected_palette_ < 0 || selected_palette_ >= static_cast<int>(palettes_.size())) {
+    if (edit_session_.selected_palette_for_edit() < 0 || edit_session_.selected_palette_for_edit() >= static_cast<int>(palettes_.size())) {
         set_status(text(TextId::StatusUseSaveNew));
         return;
     }
 
-    const Palette selected = palettes_[static_cast<std::size_t>(selected_palette_)];
+    const Palette selected = palettes_[static_cast<std::size_t>(edit_session_.selected_palette_for_edit())];
     std::string error;
-    if (!overwrite_palette_file(selected, settings_.palette, error)) {
+    if (!overwrite_palette_file(selected, edit_session_.settings_for_edit().palette, error)) {
         set_status(textf(TextId::StatusPaletteSaveFailedFormat, {{"error", error}}));
         return;
     }
@@ -2151,14 +2015,14 @@ void App::request_save_palette()
 
 void App::request_save_palette_as()
 {
-    if (settings_.palette.empty()) {
+    if (edit_session_.settings_for_edit().palette.empty()) {
         set_status(text(TextId::StatusAddColorBeforeSaving));
         return;
     }
 
     std::string name = "custom-palette";
-    if (selected_palette_ >= 0 && selected_palette_ < static_cast<int>(palettes_.size())) {
-        name = palettes_[static_cast<std::size_t>(selected_palette_)].name + "-copy";
+    if (edit_session_.selected_palette_for_edit() >= 0 && edit_session_.selected_palette_for_edit() < static_cast<int>(palettes_.size())) {
+        name = palettes_[static_cast<std::size_t>(edit_session_.selected_palette_for_edit())].name + "-copy";
     }
 
     PaletteSaveAsState state;
@@ -2169,12 +2033,12 @@ void App::request_save_palette_as()
 
 void App::request_delete_selected_palette()
 {
-    if (selected_palette_ < 0 || selected_palette_ >= static_cast<int>(palettes_.size())) {
+    if (edit_session_.selected_palette_for_edit() < 0 || edit_session_.selected_palette_for_edit() >= static_cast<int>(palettes_.size())) {
         set_status(text(TextId::StatusNoPaletteSelected));
         return;
     }
 
-    pending_delete_palette_ = palettes_[static_cast<std::size_t>(selected_palette_)];
+    pending_delete_palette_ = palettes_[static_cast<std::size_t>(edit_session_.selected_palette_for_edit())];
     open_delete_palette_confirm_ = true;
 }
 
@@ -2182,14 +2046,14 @@ bool App::save_palette_as_name(const std::string& name)
 {
     Palette saved;
     std::string error;
-    if (!save_palette_as_new(name, settings_.palette, saved, error)) {
+    if (!save_palette_as_new(name, edit_session_.settings_for_edit().palette, saved, error)) {
         set_status(textf(TextId::StatusPaletteSaveFailedFormat, {{"error", error}}));
         return false;
     }
 
     refresh_palettes();
     select_palette_by_path(saved.path);
-    settings_.use_palette = true;
+    edit_session_.settings_for_edit().use_palette = true;
     set_status(textf(TextId::StatusSavedPaletteFormat, {{"name", saved.name}}));
     return true;
 }
@@ -2198,13 +2062,13 @@ bool App::select_palette_by_path(const std::filesystem::path& path)
 {
     for (int i = 0; i < static_cast<int>(palettes_.size()); ++i) {
         if (palettes_[static_cast<std::size_t>(i)].path == path) {
-            selected_palette_ = i;
-            settings_.palette = palettes_[static_cast<std::size_t>(i)].colors;
+            edit_session_.selected_palette_for_edit() = i;
+            edit_session_.settings_for_edit().palette = palettes_[static_cast<std::size_t>(i)].colors;
             return true;
         }
     }
 
-    selected_palette_ = -1;
+    edit_session_.selected_palette_for_edit() = -1;
     return false;
 }
 
@@ -2248,17 +2112,17 @@ void App::refresh_palettes()
 {
     palettes_ = load_saved_palettes();
     if (!palettes_.empty()) {
-        selected_palette_ = std::clamp(selected_palette_, 0, static_cast<int>(palettes_.size()) - 1);
-        settings_.palette = palettes_[static_cast<std::size_t>(selected_palette_)].colors;
+        edit_session_.selected_palette_for_edit() = std::clamp(edit_session_.selected_palette_for_edit(), 0, static_cast<int>(palettes_.size()) - 1);
+        edit_session_.settings_for_edit().palette = palettes_[static_cast<std::size_t>(edit_session_.selected_palette_for_edit())].colors;
     } else {
-        selected_palette_ = -1;
-        settings_.palette.clear();
+        edit_session_.selected_palette_for_edit() = -1;
+        edit_session_.settings_for_edit().palette.clear();
     }
 }
 
 void App::mark_dirty()
 {
-    preview_dirty_ = true;
+    edit_session_.mark_dirty();
 }
 
 void App::set_status(std::string message)
@@ -2286,128 +2150,64 @@ std::string App::imgui_label(TextId label, const char* id) const
     return value;
 }
 
+FileDialogLabels App::file_dialog_labels() const
+{
+    return {
+        text(TextId::ImagesFilter),
+        text(TextId::AllFilesFilter),
+        text(TextId::LospecPalettesFilter),
+        text(TextId::PngImageFilter),
+    };
+}
+
 void App::normalize_settings()
 {
-    settings_.pixel_size = std::clamp(settings_.pixel_size, 1, 128);
-    settings_.color_levels = std::clamp(settings_.color_levels, 2, 64);
-    settings_.reduction_max_colors = std::clamp(settings_.reduction_max_colors, 0, 256);
-    if (settings_.bayer_matrix_size <= 2) {
-        settings_.bayer_matrix_size = 2;
-    } else if (settings_.bayer_matrix_size <= 4) {
-        settings_.bayer_matrix_size = 4;
-    } else {
-        settings_.bayer_matrix_size = 8;
-    }
-    settings_.dither_amount = std::clamp(settings_.dither_amount, 0.0F, 1.0F);
-
-    settings_.adjustments.brightness = std::clamp(settings_.adjustments.brightness, -1.0F, 1.0F);
-    settings_.adjustments.contrast = std::clamp(settings_.adjustments.contrast, -1.0F, 1.0F);
-    settings_.adjustments.gamma = std::clamp(settings_.adjustments.gamma, 0.1F, 4.0F);
-    settings_.adjustments.saturation = std::clamp(settings_.adjustments.saturation, 0.0F, 2.5F);
-    settings_.adjustments.tint_strength = std::clamp(settings_.adjustments.tint_strength, 0.0F, 1.0F);
-
-    settings_.adjustments.input_black = std::clamp(settings_.adjustments.input_black, 0.0F, 0.95F);
-    settings_.adjustments.input_white = std::clamp(settings_.adjustments.input_white, 0.05F, 1.0F);
-    if (settings_.adjustments.input_black >= settings_.adjustments.input_white) {
-        settings_.adjustments.input_black = std::max(0.0F, settings_.adjustments.input_white - 0.01F);
-    }
-
-    settings_.adjustments.output_black = std::clamp(settings_.adjustments.output_black, 0.0F, 0.95F);
-    settings_.adjustments.output_white = std::clamp(settings_.adjustments.output_white, 0.05F, 1.0F);
-    if (settings_.adjustments.output_black >= settings_.adjustments.output_white) {
-        settings_.adjustments.output_black = std::max(0.0F, settings_.adjustments.output_white - 0.01F);
-    }
+    edit_session_.normalize();
 }
 
 App::HistorySnapshot App::capture_history_snapshot() const
 {
-    return {settings_, selected_palette_};
+    return edit_session_.capture_snapshot();
 }
 
 void App::record_control_history(const HistorySnapshot& before)
 {
-    const HistorySnapshot after = capture_history_snapshot();
-    const bool changed = !(before == after);
-    const bool editing = ImGui::IsAnyItemActive();
-
-    if (editing) {
-        if (changed && !active_edit_snapshot_) {
-            active_edit_snapshot_ = before;
-        }
-        return;
-    }
-
-    if (active_edit_snapshot_) {
-        commit_history_change(*active_edit_snapshot_);
-        active_edit_snapshot_.reset();
-        return;
-    }
-
-    if (changed) {
-        commit_history_change(before);
-    }
+    edit_session_.finish_live_edit(before, ImGui::IsAnyItemActive());
 }
 
 void App::commit_history_change(const HistorySnapshot& before)
 {
-    if (before == capture_history_snapshot()) {
-        return;
-    }
-
-    undo_stack_.push_back(before);
-    if (undo_stack_.size() > kMaxHistoryEntries) {
-        undo_stack_.erase(undo_stack_.begin());
-    }
-    redo_stack_.clear();
-}
-
-void App::apply_history_snapshot(const HistorySnapshot& snapshot)
-{
-    settings_ = snapshot.settings;
-    selected_palette_ = snapshot.selected_palette;
-    if (selected_palette_ < 0 || selected_palette_ >= static_cast<int>(palettes_.size())) {
-        selected_palette_ = -1;
-    }
-    active_edit_snapshot_.reset();
-    mark_dirty();
+    edit_session_.commit_edit(before);
 }
 
 void App::undo()
 {
-    if (!can_undo()) {
+    if (!edit_session_.undo(palettes_.size())) {
         set_status(text(TextId::StatusNothingToUndo));
         return;
     }
 
-    redo_stack_.push_back(capture_history_snapshot());
-    const HistorySnapshot snapshot = undo_stack_.back();
-    undo_stack_.pop_back();
-    apply_history_snapshot(snapshot);
     set_status(text(TextId::StatusUndid));
 }
 
 void App::redo()
 {
-    if (!can_redo()) {
+    if (!edit_session_.redo(palettes_.size())) {
         set_status(text(TextId::StatusNothingToRedo));
         return;
     }
 
-    undo_stack_.push_back(capture_history_snapshot());
-    const HistorySnapshot snapshot = redo_stack_.back();
-    redo_stack_.pop_back();
-    apply_history_snapshot(snapshot);
     set_status(text(TextId::StatusRedid));
 }
 
 bool App::can_undo() const noexcept
 {
-    return !undo_stack_.empty();
+    return edit_session_.can_undo();
 }
 
 bool App::can_redo() const noexcept
 {
-    return !redo_stack_.empty();
+    return edit_session_.can_redo();
 }
 
 bool App::slider_int_direct(TextId label, const char* id, int& value, int minimum, int maximum)
@@ -2456,7 +2256,7 @@ bool App::slider_float_direct_value(TextId label, const char* id, float value, f
 
 void App::open_number_edit(std::string label, double value, double minimum, double maximum, bool integer, std::string format, std::function<void(double)> apply)
 {
-    active_edit_snapshot_.reset();
+    edit_session_.cancel_live_edit();
 
     NumberEditState state;
     state.label = std::move(label);

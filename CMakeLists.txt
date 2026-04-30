@@ -77,10 +77,12 @@ target_link_libraries(imgui PUBLIC ${PIXELIZER_SDL_TARGET})
 
 set(PIXELIZER_APP_SOURCES
     src/app.cpp
+    src/file_command_pump.cpp
     src/image_io.cpp
     src/localization.cpp
     src/main.cpp
     src/palette.cpp
+    src/processing_edit_session.cpp
     src/vendor/stb_impl.cpp
 )
 
@@ -127,3 +129,64 @@ if(MSVC)
 else()
     target_compile_options(pixelizer PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+enable_testing()
+
+add_executable(pixelizer_processing_edit_session_tests
+    tests/processing_edit_session_tests.cpp
+    src/processing_edit_session.cpp
+)
+
+target_include_directories(pixelizer_processing_edit_session_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+)
+
+if(MSVC)
+    target_compile_options(pixelizer_processing_edit_session_tests PRIVATE /W4 /permissive- /utf-8)
+else()
+    target_compile_options(pixelizer_processing_edit_session_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME processing_edit_session COMMAND pixelizer_processing_edit_session_tests)
+
+add_executable(pixelizer_file_command_pump_tests
+    tests/file_command_pump_tests.cpp
+    src/file_command_pump.cpp
+)
+
+target_include_directories(pixelizer_file_command_pump_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(pixelizer_file_command_pump_tests
+    PRIVATE
+        ${PIXELIZER_SDL_TARGET}
+)
+
+if(MSVC)
+    target_compile_options(pixelizer_file_command_pump_tests PRIVATE /W4 /permissive- /utf-8)
+else()
+    target_compile_options(pixelizer_file_command_pump_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME file_command_pump COMMAND pixelizer_file_command_pump_tests)
+
+add_executable(pixelizer_localization_tests
+    tests/localization_tests.cpp
+    src/localization.cpp
+)
+
+target_include_directories(pixelizer_localization_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+)
+
+if(MSVC)
+    target_compile_options(pixelizer_localization_tests PRIVATE /W4 /permissive- /utf-8)
+else()
+    target_compile_options(pixelizer_localization_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME localization COMMAND pixelizer_localization_tests)
