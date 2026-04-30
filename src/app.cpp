@@ -123,14 +123,14 @@ const char* bayer_pattern_label(int size)
     return "16x16";
 }
 
-std::string ensure_png_extension(std::filesystem::path path)
+std::string ensure_extension(std::filesystem::path path, const char* expected_extension)
 {
     std::string extension = path.extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
     });
-    if (extension != ".png") {
-        path.replace_extension(".png");
+    if (extension != expected_extension) {
+        path.replace_extension(expected_extension);
     }
     return path.string();
 }
@@ -768,8 +768,14 @@ void App::render_menu_bar()
         request_import_palette();
     }
     ImGui::SameLine();
-    if (ImGui::Button(imgui_label(TextId::ExportPng, "ExportPng").c_str())) {
-        request_export_png();
+    if (ImGui::BeginMenu(imgui_label(TextId::Export, "Export").c_str())) {
+        if (ImGui::MenuItem(imgui_label(TextId::ExportPng, "ExportPng").c_str())) {
+            request_export_png();
+        }
+        if (ImGui::MenuItem(imgui_label(TextId::ExportRaw, "ExportRaw").c_str())) {
+            request_export_raw();
+        }
+        ImGui::EndMenu();
     }
     ImGui::SameLine();
     const bool single_viewport = viewport_mode_ == ViewportMode::Single;
@@ -852,7 +858,7 @@ void App::render_language_picker_popup()
     const float side_padding = 24.0F;
     const float popup_width = std::max(300.0F, option_width * 2.0F + style.ItemSpacing.x + side_padding * 2.0F + 18.0F);
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    const float popup_height = std::min(390.0F, std::max(260.0F, viewport->WorkSize.y - 24.0F));
+    const float popup_height = std::min(410.0F, std::max(260.0F, viewport->WorkSize.y - 24.0F));
     ImGui::SetNextWindowSize(ImVec2(popup_width, popup_height), ImGuiCond_Always);
 
     bool popup_open = true;
@@ -872,8 +878,9 @@ void App::render_language_picker_popup()
     constexpr std::size_t kLanguageColumnCount = 2;
     const std::size_t rows_per_column = (languages.size() + kLanguageColumnCount - 1U) / kLanguageColumnCount;
     const float list_width = option_width * 2.0F + style.ItemSpacing.x;
-    const float full_list_height = static_cast<float>(rows_per_column) * kLanguageOptionRowHeight;
-    const float close_button_area = ImGui::GetFrameHeightWithSpacing() + style.ItemSpacing.y;
+    const float full_list_height = static_cast<float>(rows_per_column) * kLanguageOptionRowHeight
+        + static_cast<float>(rows_per_column) * style.ItemSpacing.y;
+    const float close_button_area = ImGui::GetFrameHeight() + style.WindowPadding.y + style.ItemSpacing.y;
     const float list_height = std::min(full_list_height, std::max(kLanguageOptionRowHeight * 4.0F, ImGui::GetContentRegionAvail().y - close_button_area));
 
     ImGui::BeginChild("##LanguageList", ImVec2(list_width, list_height), ImGuiChildFlags_None);
@@ -900,7 +907,7 @@ void App::render_language_picker_popup()
     }
     ImGui::EndChild();
 
-    ImGui::Spacing();
+    ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY() + style.ItemSpacing.y, ImGui::GetWindowHeight() - style.WindowPadding.y - ImGui::GetFrameHeight()));
     if (ImGui::Button(imgui_label(TextId::Close, "CloseLanguagePicker").c_str()) || !popup_open) {
         ImGui::CloseCurrentPopup();
     }
@@ -1871,6 +1878,11 @@ void App::request_export_png()
     (void)file_commands_.request_export_png_dialog(window_, file_dialog_labels());
 }
 
+void App::request_export_raw()
+{
+    (void)file_commands_.request_export_raw_dialog(window_, file_dialog_labels());
+}
+
 void App::drain_file_commands()
 {
     for (const FileCommand& command : file_commands_.drain_commands()) {
@@ -1888,7 +1900,10 @@ void App::handle_file_command(const FileCommand& command)
         import_palette_from_path(command.path);
         break;
     case FileCommandKind::ExportPng:
-        export_result_to_path(command.path);
+        export_result_to_png_path(command.path);
+        break;
+    case FileCommandKind::ExportRaw:
+        export_result_to_raw_path(command.path);
         break;
     case FileCommandKind::ConfirmOpenImage:
         pending_dropped_image_ = command.path;
@@ -2137,7 +2152,7 @@ void App::delete_pending_palette()
     set_status(textf(TextId::StatusDeletedPaletteFormat, {{"name", deleted_name}}));
 }
 
-void App::export_result_to_path(const std::filesystem::path& path)
+void App::export_result_to_png_path(const std::filesystem::path& path)
 {
     if (result_.empty()) {
         set_status(text(TextId::StatusExportSkipped));
@@ -2145,8 +2160,37 @@ void App::export_result_to_path(const std::filesystem::path& path)
     }
 
     std::string error;
-    const std::string destination = ensure_png_extension(path);
+    const std::string destination = ensure_extension(path, ".png");
     if (!save_png_rgba(destination, result_, error)) {
+        set_status(textf(TextId::StatusExportFailedFormat, {{"error", error}}));
+        return;
+    }
+
+    last_export_path_ = destination;
+    set_status(textf(TextId::StatusExportedFormat, {{"name", std::filesystem::path(destination).filename().string()}}));
+}
+
+void App::export_result_to_raw_path(const std::filesystem::path& path)
+{
+    if (result_.empty()) {
+        set_status(text(TextId::StatusExportSkipped));
+        return;
+    }
+
+    const ProcessSettings& settings = edit_session_.settings();
+    const std::vector<Color32> empty_palette;
+    const std::vector<Color32>& preferred_palette = settings.use_palette ? settings.palette : empty_palette;
+
+    std::string palette_name;
+    const int selected_palette = edit_session_.selected_palette();
+    if (settings.use_palette && selected_palette >= 0 && selected_palette < static_cast<int>(palettes_.size())) {
+        const Palette& palette = palettes_[static_cast<std::size_t>(selected_palette)];
+        palette_name = palette.path.empty() ? palette.name : palette.path.stem().string();
+    }
+
+    std::string error;
+    const std::string destination = ensure_extension(path, ".raw");
+    if (!save_raw_indexed(destination, result_, preferred_palette, palette_name, error)) {
         set_status(textf(TextId::StatusExportFailedFormat, {{"error", error}}));
         return;
     }
@@ -2204,6 +2248,7 @@ FileDialogLabels App::file_dialog_labels() const
         text(TextId::AllFilesFilter),
         text(TextId::LospecPalettesFilter),
         text(TextId::PngImageFilter),
+        text(TextId::RawImageFilter),
     };
 }
 

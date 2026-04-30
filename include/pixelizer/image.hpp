@@ -33,5 +33,16 @@ struct ImageLoadResult {
 
 ImageLoadResult load_image_rgba(const std::string& path);
 bool save_png_rgba(const std::string& path, const Image& image, std::string& error);
+bool save_raw_indexed(
+    const std::string& path,
+    const Image& image,
+    const std::vector<Color32>& preferred_palette,
+    const std::string& palette_name,
+    std::string& error);
+bool save_raw_indexed(
+    const std::string& path,
+    const Image& image,
+    const std::vector<Color32>& preferred_palette,
+    std::string& error);
 
 } // namespace pixelizer

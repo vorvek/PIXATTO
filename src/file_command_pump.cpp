@@ -138,6 +138,16 @@ bool FileCommandPump::request_export_png_dialog(SDL_Window* window, const FileDi
         true);
 }
 
+bool FileCommandPump::request_export_raw_dialog(SDL_Window* window, const FileDialogLabels& labels)
+{
+    return request_dialog(
+        window,
+        FileCommandKind::ExportRaw,
+        {labels.raw_image_filter},
+        {"raw"},
+        true);
+}
+
 void FileCommandPump::submit_drop(std::filesystem::path path, bool has_open_image)
 {
     if (path.empty()) {

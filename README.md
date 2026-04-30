@@ -15,7 +15,8 @@ Pixelizer is a desktop image tool for turning PNG, JPG, and BMP files into pseud
 - Direct numeric entry by double-clicking numeric controls
 - PNG/JPG/BMP import via `stb_image`
 - Drag-and-drop image import with replace confirmation, plus `.hex` palette drop import
-- PNG export via `stb_image_write`
+- PNG export that writes indexed 8-bit PNGs when the result fits in 256 palette entries, and truecolor PNGs otherwise
+- Raw indexed export with shared palette sidecars and optional 1-bit transparency masks
 - Validated Lospec `.hex` palette import with duplicate handling, plus in-app palette creation, color editing, color deletion, save, save-new, and palette deletion
 - Bundled default palettes, including Lospec palettes and greyscale ramps, that are seeded into the palette library on first launch and can still be deleted
 - Palettes are limited to 256 colors, whether imported or created in the app
@@ -64,6 +65,23 @@ brew install cmake ninja
 cmake --preset ninja-release
 cmake --build --preset ninja-release
 ./build/ninja-release/pixelizer
+```
+
+## Raw Export Format
+
+Raw export writes a headerless 8-bit indexed image plus sidecar files:
+
+- `<image>.raw` contains exactly `width * height` bytes in row-major order, left-to-right and top-to-bottom. Each byte is a palette index from `0` to `255`.
+- `<palette>.pal` contains the shared palette. If a saved palette is active, the sidecar is named from that palette, so multiple raw images can share one palette file. If there is no saved active palette, it uses the exported image stem. The file is ASCII text with one uppercase `RRGGBB` color per line; the line number is the palette index.
+- `<image>.msk` is written only when the result contains transparent pixels. It contains `ceil(width * height / 8)` bytes in the same pixel order. Bits are packed most-significant-bit first within each byte. A `1` bit means transparent; a `0` bit means opaque. For transparent pixels, the corresponding `.raw` index byte is `0` and should be ignored.
+
+Pixelizer raw export supports up to 256 opaque palette colors plus binary transparency. It does not store width or height in the files, so projects should keep dimensions in their own asset metadata.
+
+For pixel `i = y * width + x`:
+
+```c
+uint8_t index = raw[i];
+bool transparent = mask && (mask[i / 8] & (0x80 >> (i & 7)));
 ```
 
 ## Dependencies

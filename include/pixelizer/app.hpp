@@ -103,6 +103,7 @@ private:
     void request_open_image();
     void request_import_palette();
     void request_export_png();
+    void request_export_raw();
     void drain_file_commands();
     void handle_file_command(const FileCommand& command);
     void load_image_from_path(const std::filesystem::path& path);
@@ -119,7 +120,8 @@ private:
     bool save_palette_as_name(const std::string& name);
     bool select_palette_by_path(const std::filesystem::path& path);
     void delete_pending_palette();
-    void export_result_to_path(const std::filesystem::path& path);
+    void export_result_to_png_path(const std::filesystem::path& path);
+    void export_result_to_raw_path(const std::filesystem::path& path);
     void refresh_palettes();
     void mark_dirty();
     void set_status(std::string message);

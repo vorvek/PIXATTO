@@ -17,6 +17,7 @@ enum class FileCommandKind {
     OpenImage,
     ImportPalette,
     ExportPng,
+    ExportRaw,
     ConfirmOpenImage,
     DialogFailed,
 };
@@ -32,6 +33,7 @@ struct FileDialogLabels {
     std::string all_files_filter;
     std::string lospec_palettes_filter;
     std::string png_image_filter;
+    std::string raw_image_filter;
 };
 
 class FileCommandPump {
@@ -46,6 +48,7 @@ public:
     [[nodiscard]] bool request_open_image_dialog(SDL_Window* window, const FileDialogLabels& labels);
     [[nodiscard]] bool request_import_palette_dialog(SDL_Window* window, const FileDialogLabels& labels);
     [[nodiscard]] bool request_export_png_dialog(SDL_Window* window, const FileDialogLabels& labels);
+    [[nodiscard]] bool request_export_raw_dialog(SDL_Window* window, const FileDialogLabels& labels);
 
     void submit_drop(std::filesystem::path path, bool has_open_image);
     [[nodiscard]] std::vector<FileCommand> drain_commands();
