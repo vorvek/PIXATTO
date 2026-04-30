@@ -181,11 +181,6 @@ bool should_write_transparent(float alpha, const ProcessSettings& settings)
     return settings.preserve_transparency && alpha < kTransparencyThreshold;
 }
 
-float output_alpha(float alpha, const ProcessSettings& settings)
-{
-    return settings.preserve_transparency ? 1.0F : alpha;
-}
-
 float apply_levels_channel(float value, float input_black, float input_white, float output_black, float output_white)
 {
     const float in_black = clamp01(input_black);
@@ -598,8 +593,8 @@ Color32 quantize_color(Vec3 color, float alpha, const std::vector<PaletteEntry>&
     color.b = clamp01(color.b);
 
     return !palette_entries.empty()
-        ? nearest_palette_color(color, palette_entries, output_alpha(alpha, settings))
-        : reduce_color(color, settings.color_levels, output_alpha(alpha, settings));
+        ? nearest_palette_color(color, palette_entries, 1.0F)
+        : reduce_color(color, settings.color_levels, 1.0F);
 }
 
 std::uint32_t quant_key(Color32 color)
