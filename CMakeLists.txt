@@ -25,6 +25,51 @@ set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
 set(SDL_TESTS OFF CACHE BOOL "" FORCE)
 set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+set(SDL_AUDIO OFF CACHE BOOL "" FORCE)
+set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
+set(SDL_GPU OFF CACHE BOOL "" FORCE)
+set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
+set(SDL_HIDAPI OFF CACHE BOOL "" FORCE)
+set(SDL_JOYSTICK OFF CACHE BOOL "" FORCE)
+set(SDL_POWER OFF CACHE BOOL "" FORCE)
+set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
+set(SDL_TRAY OFF CACHE BOOL "" FORCE)
+set(SDL_RENDER_D3D12 OFF CACHE BOOL "" FORCE)
+set(SDL_RENDER_GPU OFF CACHE BOOL "" FORCE)
+set(SDL_RENDER_VULKAN OFF CACHE BOOL "" FORCE)
+set(SDL_VULKAN OFF CACHE BOOL "" FORCE)
+
+include(CheckCCompilerFlag)
+include(CheckCXXCompilerFlag)
+include(CheckLinkerFlag)
+
+function(pixelizer_enable_release_sections target)
+    if(MSVC)
+        return()
+    endif()
+
+    check_c_compiler_flag("-ffunction-sections" PIXELIZER_HAS_C_FUNCTION_SECTIONS)
+    check_cxx_compiler_flag("-ffunction-sections" PIXELIZER_HAS_CXX_FUNCTION_SECTIONS)
+    if(PIXELIZER_HAS_C_FUNCTION_SECTIONS AND PIXELIZER_HAS_CXX_FUNCTION_SECTIONS)
+        target_compile_options(${target} PRIVATE
+            $<$<CONFIG:Release>:-ffunction-sections -fdata-sections>
+        )
+    endif()
+endfunction()
+
+function(pixelizer_enable_release_dead_code_collection target)
+    if(MSVC)
+        return()
+    endif()
+
+    pixelizer_enable_release_sections(${target})
+    check_linker_flag(CXX "-Wl,--gc-sections" PIXELIZER_HAS_GC_SECTIONS)
+    if(PIXELIZER_HAS_GC_SECTIONS)
+        target_link_options(${target} PRIVATE
+            $<$<CONFIG:Release>:-Wl,--gc-sections>
+        )
+    endif()
+endfunction()
 
 FetchContent_Declare(
     SDL3
@@ -74,6 +119,7 @@ target_include_directories(imgui
 )
 
 target_link_libraries(imgui PUBLIC ${PIXELIZER_SDL_TARGET})
+pixelizer_enable_release_sections(imgui)
 
 set(PIXELIZER_APP_SOURCES
     src/app.cpp
@@ -113,6 +159,12 @@ target_link_libraries(pixelizer
         ${PIXELIZER_SDL_TARGET}
         imgui
 )
+
+if(TARGET SDL3-static)
+    pixelizer_enable_release_sections(SDL3-static)
+endif()
+
+pixelizer_enable_release_dead_code_collection(pixelizer)
 
 add_custom_command(TARGET pixelizer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E rm -rf
