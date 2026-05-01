@@ -114,7 +114,7 @@ void reset_runtime_log()
 
     output << runtime_log_timestamp()
            << " [thread " << std::this_thread::get_id() << "] "
-           << "Pixatto runtime log started. path=" << runtime_log_path().string() << '\n';
+           << "PIXATTO runtime log started. path=" << runtime_log_path().string() << '\n';
     output.flush();
 }
 
@@ -842,7 +842,7 @@ bool App::initialize()
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 #endif
 
-    window_ = SDL_CreateWindow("Pixatto", kInitialWidth, kInitialHeight, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
+    window_ = SDL_CreateWindow("PIXATTO", kInitialWidth, kInitialHeight, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
     if (!window_) {
         append_runtime_log(std::string("initialize: SDL_CreateWindow failed: ") + SDL_GetError());
         set_status(textf(TextId::StatusSdlCreateWindowFailedFormat, {{"error", SDL_GetError()}}));
@@ -984,7 +984,7 @@ void App::render_frame()
         | ImGuiWindowFlags_NoSavedSettings
         | ImGuiWindowFlags_NoBringToFrontOnFocus;
     const bool disable_workspace = file_commands_.dialog_open();
-    ImGui::Begin("Pixatto Workspace", nullptr, flags);
+    ImGui::Begin("PIXATTO Workspace", nullptr, flags);
     if (disable_workspace) {
         ImGui::BeginDisabled();
     }
@@ -1307,7 +1307,7 @@ void App::render_about_dialog()
     };
 
     ImGui::BeginChild("##AboutContent", ImVec2(0.0F, content_height), ImGuiChildFlags_None);
-    ImGui::TextUnformatted("Pixatto");
+    ImGui::TextUnformatted("PIXATTO");
     ImGui::Separator();
     ImGui::TextWrapped("%s", text(TextId::AboutProjectCredit));
     ImGui::TextWrapped("%s", text(TextId::AboutProjectLicense));

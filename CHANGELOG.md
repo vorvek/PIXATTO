@@ -2,8 +2,8 @@
 
 ## 1.7.0 - 2026-05-01
 
-- Renamed the application from Pixelizer to Pixatto across the app title, release packages, documentation, source namespace, headers, and build targets.
-- Added first-run migration for existing Pixelizer palette and preset folders into Pixatto's preference folder.
+- Renamed the application from Pixelizer to PIXATTO across the app title, release packages, documentation, source namespace, headers, and build targets.
+- Added first-run migration for existing Pixelizer palette and preset folders into PIXATTO's preference folder.
 - Added a batch pixelize workflow that queues multiple images, writes PNG or raw indexed output to a chosen folder, and can run with the current settings or a saved preset.
 - Added saved processing presets, including apply, overwrite, delete, conflict handling, and localized UI text.
 - Switched image import decoding to SDL_image and added TGA, GIF, WebP, JPEG XL, QOI, TIFF, and PNM-family imports with binary imported transparency.

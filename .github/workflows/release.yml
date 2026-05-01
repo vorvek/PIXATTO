@@ -54,7 +54,7 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $packageName = "Pixatto-${env:RELEASE_TAG}-windows-x64"
+          $packageName = "PIXATTO-${env:RELEASE_TAG}-windows-x64"
           $packageDir = Join-Path "dist" $packageName
           New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
 
@@ -123,7 +123,7 @@ jobs:
 
       - name: Package
         run: |
-          package_name="Pixatto-${RELEASE_TAG}-linux-x64"
+          package_name="PIXATTO-${RELEASE_TAG}-linux-x64"
           package_dir="dist/${package_name}"
           mkdir -p "$package_dir"
 
@@ -161,7 +161,7 @@ jobs:
 
       - name: Package
         run: |
-          package_name="Pixatto-${RELEASE_TAG}-macos"
+          package_name="PIXATTO-${RELEASE_TAG}-macos"
           package_dir="dist/${package_name}"
           mkdir -p "$package_dir"
 
@@ -200,9 +200,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          title="Pixatto ${RELEASE_TAG}"
+          title="PIXATTO ${RELEASE_TAG}"
           notes="$(cat <<'NOTES'
-          Automated desktop builds for Pixatto.
+          Automated desktop builds for PIXATTO.
 
           Assets:
           - Windows x64

@@ -1,16 +1,16 @@
-# <img src="assets/icon/pixatto-icon-32.png" width="32" height="32" alt="Pixatto icon"> Pixatto
+# <img src="assets/icon/pixatto-icon-32.png" width="32" height="32" alt="PIXATTO icon"> PIXATTO
 
-[![Release](https://github.com/vorvek/Pixatto/actions/workflows/release.yml/badge.svg)](https://github.com/vorvek/Pixatto/actions/workflows/release.yml)
+[![Release](https://github.com/vorvek/PIXATTO/actions/workflows/release.yml/badge.svg)](https://github.com/vorvek/PIXATTO/actions/workflows/release.yml)
 
-Pixatto is a desktop texture tool for turning images and 3D model textures into pseudo-pixel art. It runs on Windows, Linux, and macOS, and is written in C++20 with SDL3, OpenGL, and Dear ImGui.
+PIXATTO is a desktop texture tool for turning images and 3D model textures into pseudo-pixel art. It runs on Windows, Linux, and macOS, and is written in C++20 with SDL3, OpenGL, and Dear ImGui.
 
 | Image workflow | 3D model texture workflow |
 | --- | --- |
-| ![Pixatto showing an original image beside a processed pseudo-pixel-art result](docs/pixatto-in-action.png) | ![Pixatto showing a 3D model preview with materials and a texture drawer](docs/3d_models.png) |
+| ![PIXATTO showing an original image beside a processed pseudo-pixel-art result](docs/pixatto-in-action.png) | ![PIXATTO showing a 3D model preview with materials and a texture drawer](docs/3d_models.png) |
 
 ## What It Does
 
-Pixatto keeps the editing loop simple: import an asset, tune the pixelization, palette, dithering, and adjustment controls, preview the result live, then export the processed output. Reusable presets and batch image processing are available when the same look needs to be applied again.
+PIXATTO keeps the editing loop simple: import an asset, tune the pixelization, palette, dithering, and adjustment controls, preview the result live, then export the processed output. Reusable presets and batch image processing are available when the same look needs to be applied again.
 
 It supports standalone images and model texture workflows:
 
@@ -20,7 +20,7 @@ It supports standalone images and model texture workflows:
 
 ## Image Workflow
 
-Image imports use Pixatto's standard image workflow. The app shows a result viewport by default, with optional two-view layouts for comparing the original and processed image.
+Image imports use PIXATTO's standard image workflow. The app shows a result viewport by default, with optional two-view layouts for comparing the original and processed image.
 Imports decode to a single flattened image; animated imports are treated as still images for now, and imported alpha is simplified to binary transparency.
 
 Features include:
@@ -37,7 +37,7 @@ Features include:
 
 ## 3D Model Texture Workflow
 
-Model imports switch Pixatto into model mode. GLB, glTF, OBJ, FBX, and DAE files are loaded into an unshaded OpenGL preview so the processed textures can be checked directly on the mesh.
+Model imports switch PIXATTO into model mode. GLB, glTF, OBJ, FBX, and DAE files are loaded into an unshaded OpenGL preview so the processed textures can be checked directly on the mesh.
 
 In model mode:
 
@@ -49,7 +49,7 @@ In model mode:
 - The original viewport shows a gallery of source textures.
 - The working viewport shows the processed model preview.
 
-Pixatto currently processes diffuse/base-color textures only. Normal, metallic, roughness, occlusion, and other data maps are left untouched.
+PIXATTO currently processes diffuse/base-color textures only. Normal, metallic, roughness, occlusion, and other data maps are left untouched.
 
 ## Controls
 
@@ -77,11 +77,11 @@ PNG export writes indexed 8-bit PNGs when the result fits in 256 palette entries
 
 ## Downloads
 
-Download the latest release from the [Releases page](https://github.com/vorvek/Pixatto/releases).
+Download the latest release from the [Releases page](https://github.com/vorvek/PIXATTO/releases).
 
 ## Build From Source
 
-Pixatto uses CMake presets and fetches its libraries at configure time.
+PIXATTO uses CMake presets and fetches its libraries at configure time.
 
 ### Windows
 
@@ -124,7 +124,7 @@ Raw export writes a headerless 8-bit indexed image plus sidecar files:
 - `<palette>.pal` contains the shared palette. If a saved palette is active, the sidecar is named from that palette, so multiple raw images can share one palette file. If there is no saved active palette, it uses the exported image stem. The file is ASCII text with one uppercase `RRGGBB` color per line; the line number is the palette index.
 - `<image>.msk` is written only when the result contains transparent pixels. It contains `ceil(width * height / 8)` bytes in the same pixel order. Bits are packed most-significant-bit first within each byte. A `1` bit means transparent; a `0` bit means opaque. For transparent pixels, the corresponding `.raw` index byte is `0` and should be ignored.
 
-Pixatto raw export supports up to 256 opaque palette colors plus binary transparency. It does not store width or height in the files, so projects should keep dimensions in their own asset metadata.
+PIXATTO raw export supports up to 256 opaque palette colors plus binary transparency. It does not store width or height in the files, so projects should keep dimensions in their own asset metadata.
 
 For pixel `i = y * width + x`:
 
@@ -139,4 +139,4 @@ The build statically links SDL3 `release-3.4.4`, SDL_image `release-3.4.2`, Dear
 
 ## License
 
-Pixatto is released under the [MIT License](LICENSE).
+PIXATTO is released under the [MIT License](LICENSE).

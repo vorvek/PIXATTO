@@ -1,6 +1,6 @@
 # Third-Party Dependencies
 
-Pixatto fetches these dependencies at configure time and links them into the desktop executable:
+PIXATTO fetches these dependencies at configure time and links them into the desktop executable:
 
 - SDL3 `release-3.4.4` from `libsdl-org/SDL`, under the zlib license.
 - SDL_image `release-3.4.2` from `libsdl-org/SDL_image`, under the zlib license.
@@ -19,7 +19,7 @@ SDL_image is configured with vendored permissive codec libraries for extended im
 - Highway from the vendored libjxl tree, under the Apache 2.0 license.
 - libtiff `v4.7.1-SDL`, under its BSD-style license.
 
-Pixatto bundles these default palette files from Lospec. Links point to the original palette pages:
+PIXATTO bundles these default palette files from Lospec. Links point to the original palette pages:
 
 - [pico-8](https://lospec.com/palette-list/pico-8)
 - [dawnbringer-16](https://lospec.com/palette-list/dawnbringer-16)
