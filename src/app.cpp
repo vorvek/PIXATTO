@@ -710,6 +710,28 @@ bool render_language_button(Language language, float width)
     return pressed;
 }
 
+void draw_wastebasket_icon(ImDrawList* draw_list, ImVec2 min, ImVec2 max, ImU32 color)
+{
+    const float width = max.x - min.x;
+    const float height = max.y - min.y;
+    const float scale = std::min(width, height);
+    const float icon_width = scale * 0.48F;
+    const float icon_height = scale * 0.54F;
+    const float left = min.x + (width - icon_width) * 0.5F;
+    const float top = min.y + (height - icon_height) * 0.5F + scale * 0.04F;
+    const float right = left + icon_width;
+    const float bottom = top + icon_height;
+    const float lid_y = top + scale * 0.08F;
+    const float body_top = top + scale * 0.18F;
+    const float thickness = std::max(1.25F, scale * 0.075F);
+
+    draw_list->AddLine(ImVec2(left - scale * 0.05F, lid_y), ImVec2(right + scale * 0.05F, lid_y), color, thickness);
+    draw_list->AddLine(ImVec2(left + icon_width * 0.33F, top), ImVec2(right - icon_width * 0.33F, top), color, thickness);
+    draw_list->AddRect(ImVec2(left, body_top), ImVec2(right, bottom), color, 1.5F, 0, thickness);
+    draw_list->AddLine(ImVec2(left + icon_width * 0.35F, body_top + scale * 0.08F), ImVec2(left + icon_width * 0.35F, bottom - scale * 0.08F), color, thickness * 0.8F);
+    draw_list->AddLine(ImVec2(right - icon_width * 0.35F, body_top + scale * 0.08F), ImVec2(right - icon_width * 0.35F, bottom - scale * 0.08F), color, thickness * 0.8F);
+}
+
 bool render_language_option(Language language, bool selected, float width)
 {
     const LanguageDefinition& definition = language_definition(language);
@@ -1445,7 +1467,13 @@ void App::render_preset_picker(ProcessSettings& settings, int& selected_palette)
     if (!can_delete) {
         ImGui::BeginDisabled();
     }
-    if (ImGui::Button("🗑###DeletePreset", ImVec2(delete_width, 0.0F))) {
+    const bool delete_pressed = ImGui::Button("##DeletePreset", ImVec2(delete_width, 0.0F));
+    draw_wastebasket_icon(
+        ImGui::GetWindowDrawList(),
+        ImGui::GetItemRectMin(),
+        ImGui::GetItemRectMax(),
+        ImGui::GetColorU32(can_delete ? ImGuiCol_Text : ImGuiCol_TextDisabled));
+    if (delete_pressed) {
         selected_preset_ = selected_index;
         request_delete_selected_preset();
     }
