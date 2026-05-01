@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.1 - 2026-05-01
+
+- Added FBX model import through ufbx and DAE model import through tinyxml2, keeping the importer on permissive MIT-compatible licensing.
+- Added side-by-side original/result previews in the model texture gallery so imported model textures can be checked before assignment.
+
 ## 1.6.0 - 2026-05-01
 
 - Added GLB/glTF and OBJ model import with an unshaded OpenGL preview.

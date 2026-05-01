@@ -202,6 +202,7 @@ private:
     ModelDocument model_;
     std::vector<Image> model_processed_textures_;
     std::vector<Texture> model_original_textures_;
+    std::vector<Texture> model_result_textures_;
     ModelRenderer model_renderer_;
 
     ProcessingEditSession edit_session_;

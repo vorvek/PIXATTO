@@ -51,12 +51,12 @@ void dropped_model_opens_when_no_document_is_loaded()
 {
     pixelizer::FileCommandPump pump;
 
-    pump.submit_drop("models/hero.glb", false);
+    pump.submit_drop("models/hero.dae", false);
     const auto commands = pump.drain_commands();
 
     require(commands.size() == 1U);
     require(commands[0].kind == pixelizer::FileCommandKind::OpenModel);
-    require(commands[0].path == "models/hero.glb");
+    require(commands[0].path == "models/hero.dae");
 }
 
 void dropped_model_requires_confirmation_when_document_is_loaded()

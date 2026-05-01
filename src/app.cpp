@@ -1272,6 +1272,8 @@ void App::render_about_dialog()
     wrapped_bullet(text(TextId::AboutDependencyStb));
     wrapped_bullet(text(TextId::AboutDependencyTinyGltf));
     wrapped_bullet(text(TextId::AboutDependencyTinyObj));
+    wrapped_bullet(text(TextId::AboutDependencyUfbx));
+    wrapped_bullet(text(TextId::AboutDependencyTinyXml));
 
     ImGui::Spacing();
     ImGui::TextUnformatted(text(TextId::AboutPalettesTitle));
@@ -1814,20 +1816,33 @@ void App::render_model_texture_gallery()
     }
 
     const ImGuiStyle& style = ImGui::GetStyle();
-    const float available_width = std::max(120.0F, ImGui::GetContentRegionAvail().x - style.ScrollbarSize - style.ItemSpacing.x);
-    const float thumbnail_width = std::min(260.0F, available_width);
+    const float available_width = std::max(240.0F, ImGui::GetContentRegionAvail().x - style.ScrollbarSize);
+    const float image_gap = style.ItemSpacing.x * 2.0F;
+    const float thumbnail_width = std::min(260.0F, std::max(96.0F, (available_width - image_gap) * 0.5F));
+    auto render_texture_preview = [&](TextId label, const Texture* texture) {
+        ImGui::BeginGroup();
+        ImGui::TextUnformatted(text(label));
+        if (texture && texture->handle != 0U && texture->width > 0 && texture->height > 0) {
+            const float scale = std::min(thumbnail_width / static_cast<float>(texture->width), 220.0F / static_cast<float>(texture->height));
+            const ImVec2 size(
+                std::max(1.0F, static_cast<float>(texture->width) * std::max(scale, 0.05F)),
+                std::max(1.0F, static_cast<float>(texture->height) * std::max(scale, 0.05F)));
+            ImGui::Image(imgui_texture_id(texture->handle), size);
+        } else {
+            ImGui::Dummy(ImVec2(thumbnail_width, 48.0F));
+        }
+        ImGui::EndGroup();
+    };
+
     for (std::size_t index = 0; index < model_original_textures_.size(); ++index) {
         const ModelTexture& source = model_.textures[index];
-        Texture& texture = model_original_textures_[index];
+        Texture& original_texture = model_original_textures_[index];
+        const Texture* result_texture = index < model_result_textures_.size() ? &model_result_textures_[index] : nullptr;
         ImGui::PushID(static_cast<int>(index));
         ImGui::TextWrapped("%s", source.name.empty() ? default_model_texture_export_name(source, index).c_str() : source.name.c_str());
-        if (texture.handle != 0U && texture.width > 0 && texture.height > 0) {
-            const float scale = std::min(thumbnail_width / static_cast<float>(texture.width), 220.0F / static_cast<float>(texture.height));
-            const ImVec2 size(
-                std::max(1.0F, static_cast<float>(texture.width) * std::max(scale, 0.05F)),
-                std::max(1.0F, static_cast<float>(texture.height) * std::max(scale, 0.05F)));
-            ImGui::Image(imgui_texture_id(texture.handle), size);
-        }
+        render_texture_preview(TextId::Original, &original_texture);
+        ImGui::SameLine(0.0F, image_gap);
+        render_texture_preview(TextId::Result, result_texture);
         ImGui::Spacing();
         ImGui::PopID();
     }
@@ -2333,6 +2348,14 @@ void App::update_preview_if_needed()
         for (const ModelTexture& texture : model_.textures) {
             model_processed_textures_.push_back(process_image(texture.image, edit_session_.settings()));
         }
+        while (model_result_textures_.size() > model_processed_textures_.size()) {
+            destroy_texture(model_result_textures_.back());
+            model_result_textures_.pop_back();
+        }
+        model_result_textures_.resize(model_processed_textures_.size());
+        for (std::size_t index = 0; index < model_processed_textures_.size(); ++index) {
+            rebuild_texture(model_result_textures_[index], model_processed_textures_[index], true);
+        }
         model_renderer_.update_processed_textures(model_processed_textures_);
     }
     edit_session_.clear_preview_dirty();
@@ -2724,11 +2747,13 @@ void App::finish_model_load_from_path(const std::filesystem::path& path, ModelLo
 
     append_runtime_log("model-load: processing source textures begin");
     model_original_textures_.resize(model_.textures.size());
+    model_result_textures_.resize(model_.textures.size());
     model_processed_textures_.clear();
     model_processed_textures_.reserve(model_.textures.size());
     for (std::size_t index = 0; index < model_.textures.size(); ++index) {
         rebuild_texture(model_original_textures_[index], model_.textures[index].image, false);
         model_processed_textures_.push_back(process_image(model_.textures[index].image, edit_session_.settings()));
+        rebuild_texture(model_result_textures_[index], model_processed_textures_.back(), true);
     }
     append_runtime_log("model-load: processing source textures complete");
 
@@ -2803,6 +2828,8 @@ void App::import_model_texture_from_path(const std::filesystem::path& path)
     model_original_textures_.emplace_back();
     rebuild_texture(model_original_textures_.back(), model_.textures.back().image, false);
     model_processed_textures_.push_back(process_image(model_.textures.back().image, edit_session_.settings()));
+    model_result_textures_.emplace_back();
+    rebuild_texture(model_result_textures_.back(), model_processed_textures_.back(), true);
     if (!ensure_gl_context_current()) {
         return;
     }
@@ -3163,7 +3190,11 @@ void App::clear_model_document()
     for (Texture& texture : model_original_textures_) {
         destroy_texture(texture);
     }
+    for (Texture& texture : model_result_textures_) {
+        destroy_texture(texture);
+    }
     model_original_textures_.clear();
+    model_result_textures_.clear();
     model_processed_textures_.clear();
     model_ = {};
     pending_model_texture_exports_.clear();

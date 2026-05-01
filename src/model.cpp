@@ -6,6 +6,9 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
+#include <tinyxml2.h>
+#include <ufbx.h>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -16,6 +19,7 @@
 #include <filesystem>
 #include <limits>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -48,6 +52,66 @@ struct Bounds {
     bool has_points = false;
 };
 
+struct ColladaSource {
+    std::vector<float> values;
+    std::size_t stride = 1;
+    std::size_t offset = 0;
+};
+
+struct ColladaInput {
+    std::string semantic;
+    std::string source;
+    std::size_t offset = 0;
+};
+
+enum class ColladaPrimitiveKind {
+    Triangles,
+    Polylist,
+};
+
+struct ColladaPrimitiveData {
+    ColladaPrimitiveKind kind = ColladaPrimitiveKind::Triangles;
+    std::string material_symbol;
+    std::vector<ColladaInput> inputs;
+    std::vector<int> indices;
+    std::vector<int> vertex_counts;
+};
+
+struct ColladaGeometry {
+    int index = -1;
+    std::string id;
+    std::string name;
+    std::map<std::string, ColladaSource> sources;
+    std::map<std::string, std::string> vertices_positions;
+    std::vector<ColladaPrimitiveData> primitives;
+};
+
+struct ColladaImage {
+    std::string id;
+    std::string name;
+    std::string uri;
+};
+
+struct ColladaEffect {
+    std::string id;
+    std::string image_id;
+};
+
+struct ColladaMaterial {
+    int index = -1;
+    std::string id;
+    std::string name;
+    std::string effect_id;
+};
+
+struct ColladaDocument {
+    std::map<std::string, ColladaGeometry> geometries;
+    std::map<std::string, ColladaImage> images;
+    std::map<std::string, ColladaEffect> effects;
+    std::map<std::string, ColladaMaterial> materials;
+    const tinyxml2::XMLElement* visual_scene = nullptr;
+};
+
 std::string lower_extension(const std::filesystem::path& path)
 {
     std::string extension = path.extension().string();
@@ -72,6 +136,113 @@ std::string file_name_or(std::filesystem::path path, std::string fallback)
 {
     const std::string name = path.filename().string();
     return name.empty() ? std::move(fallback) : name;
+}
+
+std::string ufbx_string_to_std(ufbx_string value)
+{
+    if (!value.data || value.length == 0U) {
+        return {};
+    }
+    return {value.data, value.length};
+}
+
+std::string ufbx_error_description(const ufbx_error& error)
+{
+    return ufbx_string_to_std(error.description);
+}
+
+std::string strip_url_id(std::string value)
+{
+    const std::size_t fragment = value.find('#');
+    if (fragment != std::string::npos) {
+        value.erase(0, fragment + 1U);
+    }
+    return value;
+}
+
+std::string xml_local_name(const char* name)
+{
+    if (!name) {
+        return {};
+    }
+    std::string value(name);
+    if (const std::size_t separator = value.find(':'); separator != std::string::npos) {
+        value.erase(0, separator + 1U);
+    }
+    return value;
+}
+
+bool xml_name_is(const tinyxml2::XMLElement* element, std::string_view name)
+{
+    return element && xml_local_name(element->Name()) == name;
+}
+
+const tinyxml2::XMLElement* first_child_named(const tinyxml2::XMLElement* parent, std::string_view name)
+{
+    if (!parent) {
+        return nullptr;
+    }
+    for (const tinyxml2::XMLElement* child = parent->FirstChildElement(); child; child = child->NextSiblingElement()) {
+        if (xml_name_is(child, name)) {
+            return child;
+        }
+    }
+    return nullptr;
+}
+
+const tinyxml2::XMLElement* next_sibling_named(const tinyxml2::XMLElement* element, std::string_view name)
+{
+    for (const tinyxml2::XMLElement* sibling = element ? element->NextSiblingElement() : nullptr; sibling;
+         sibling = sibling->NextSiblingElement()) {
+        if (xml_name_is(sibling, name)) {
+            return sibling;
+        }
+    }
+    return nullptr;
+}
+
+std::string xml_attr(const tinyxml2::XMLElement* element, const char* name)
+{
+    if (!element) {
+        return {};
+    }
+    if (const char* value = element->Attribute(name)) {
+        return value;
+    }
+    return {};
+}
+
+std::string xml_text(const tinyxml2::XMLElement* element)
+{
+    if (!element) {
+        return {};
+    }
+    if (const char* value = element->GetText()) {
+        return value;
+    }
+    return {};
+}
+
+std::vector<double> parse_double_list(const std::string& text)
+{
+    std::vector<double> values;
+    std::istringstream stream(text);
+    double value = 0.0;
+    while (stream >> value) {
+        values.push_back(value);
+    }
+    return values;
+}
+
+std::vector<int> parse_int_list(const std::string& text)
+{
+    std::vector<int> values;
+    std::istringstream stream(text);
+    int value = 0;
+    while (stream >> value) {
+        values.push_back(value);
+    }
+    return values;
 }
 
 std::string with_png_extension(std::string name)
@@ -135,6 +306,148 @@ Image rgba_from_components(int width, int height, int component_count, const std
     }
 
     return image;
+}
+
+std::filesystem::path external_texture_path(const std::filesystem::path& base_dir, std::string filename)
+{
+    for (char& ch : filename) {
+        if (ch == '\\') {
+            ch = std::filesystem::path::preferred_separator;
+        }
+    }
+
+    std::filesystem::path path(filename);
+    return path.is_absolute() ? path : base_dir / path;
+}
+
+int ufbx_typed_id_to_int(std::uint32_t id)
+{
+    if (id > static_cast<std::uint32_t>(std::numeric_limits<int>::max())) {
+        return -1;
+    }
+    return static_cast<int>(id);
+}
+
+const ufbx_texture* first_file_texture(const ufbx_texture* texture)
+{
+    if (!texture) {
+        return nullptr;
+    }
+    if (texture->type == UFBX_TEXTURE_FILE) {
+        return texture;
+    }
+    for (std::size_t index = 0; index < texture->file_textures.count; ++index) {
+        const ufbx_texture* candidate = texture->file_textures.data[index];
+        if (candidate && candidate->type == UFBX_TEXTURE_FILE) {
+            return candidate;
+        }
+    }
+    return nullptr;
+}
+
+const ufbx_texture* diffuse_texture_for_fbx_material(const ufbx_material* material)
+{
+    if (!material) {
+        return nullptr;
+    }
+
+    const std::array<const ufbx_material_map*, 2> maps = {
+        &material->pbr.base_color,
+        &material->fbx.diffuse_color,
+    };
+    for (const ufbx_material_map* map : maps) {
+        if (map && map->texture && map->texture_enabled) {
+            if (const ufbx_texture* texture = first_file_texture(map->texture)) {
+                return texture;
+            }
+        }
+    }
+    return nullptr;
+}
+
+std::string fbx_texture_filename(const ufbx_texture* texture)
+{
+    if (!texture) {
+        return {};
+    }
+    std::string filename = ufbx_string_to_std(texture->filename);
+    if (filename.empty()) {
+        filename = ufbx_string_to_std(texture->relative_filename);
+    }
+    if (filename.empty() && texture->video) {
+        filename = ufbx_string_to_std(texture->video->filename);
+    }
+    if (filename.empty() && texture->video) {
+        filename = ufbx_string_to_std(texture->video->relative_filename);
+    }
+    return filename;
+}
+
+const ufbx_blob* fbx_texture_content(const ufbx_texture* texture)
+{
+    if (!texture) {
+        return nullptr;
+    }
+    if (texture->content.data && texture->content.size > 0U) {
+        return &texture->content;
+    }
+    if (texture->video && texture->video->content.data && texture->video->content.size > 0U) {
+        return &texture->video->content;
+    }
+    return nullptr;
+}
+
+ModelTexture load_fbx_texture(
+    const std::filesystem::path& base_dir,
+    const ufbx_texture* source,
+    std::string& warning,
+    bool& ok)
+{
+    ok = false;
+    if (!source) {
+        return {};
+    }
+
+    ModelTexture texture;
+    const std::string filename = fbx_texture_filename(source);
+    if (const ufbx_blob* content = fbx_texture_content(source)) {
+        const auto* bytes = static_cast<const std::uint8_t*>(content->data);
+        ImageLoadResult loaded = load_image_rgba_memory(bytes, content->size);
+        if (!loaded.error.empty()) {
+            add_warning(warning, "Embedded FBX texture could not be loaded; using fallback.");
+            return {};
+        }
+
+        texture.embedded = true;
+        texture.image = std::move(loaded.image);
+        if (!filename.empty()) {
+            texture.name = with_png_extension(file_name_or(std::filesystem::path(filename), "embedded_texture.png"));
+        } else {
+            const std::string source_name = ufbx_string_to_std(source->name);
+            texture.name = source_name.empty() ? "embedded_texture.png" : with_png_extension(source_name);
+        }
+        ok = true;
+        return texture;
+    }
+
+    if (filename.empty()) {
+        add_warning(warning, "FBX texture has no image file reference; using fallback.");
+        return {};
+    }
+
+    const std::filesystem::path texture_path = external_texture_path(base_dir, filename);
+    ImageLoadResult loaded = load_image_rgba(texture_path.string());
+    if (!loaded.error.empty()) {
+        add_warning(warning, "Texture " + texture_path.filename().string() + " could not be loaded; using fallback.");
+        return {};
+    }
+
+    texture.name = file_name_or(texture_path, filename);
+    texture.source_path = texture_path;
+    texture.embedded = false;
+    texture.image = std::move(loaded.image);
+    ok = true;
+    return texture;
 }
 
 Mat4 multiply(Mat4 lhs, Mat4 rhs)
@@ -202,6 +515,77 @@ Mat4 rotation_matrix(const std::vector<double>& rotation)
         0.0F, 0.0F, 0.0F, 1.0F,
     };
     return result;
+}
+
+Mat4 axis_angle_matrix(const std::vector<double>& rotation)
+{
+    Mat4 result;
+    if (rotation.size() < 4U) {
+        return result;
+    }
+
+    float x = static_cast<float>(rotation[0]);
+    float y = static_cast<float>(rotation[1]);
+    float z = static_cast<float>(rotation[2]);
+    const float length = std::sqrt(x * x + y * y + z * z);
+    if (length <= 0.0F) {
+        return result;
+    }
+
+    x /= length;
+    y /= length;
+    z /= length;
+
+    constexpr float kPi = 3.14159265358979323846F;
+    const float radians = static_cast<float>(rotation[3]) * kPi / 180.0F;
+    const float c = std::cos(radians);
+    const float s = std::sin(radians);
+    const float t = 1.0F - c;
+
+    result.m = {
+        t * x * x + c, t * x * y + s * z, t * x * z - s * y, 0.0F,
+        t * x * y - s * z, t * y * y + c, t * y * z + s * x, 0.0F,
+        t * x * z + s * y, t * y * z - s * x, t * z * z + c, 0.0F,
+        0.0F, 0.0F, 0.0F, 1.0F,
+    };
+    return result;
+}
+
+Mat4 row_major_matrix(const std::vector<double>& values)
+{
+    Mat4 result;
+    if (values.size() < 16U) {
+        return result;
+    }
+
+    for (std::size_t row = 0; row < 4U; ++row) {
+        for (std::size_t column = 0; column < 4U; ++column) {
+            result.m[column * 4U + row] = static_cast<float>(values[row * 4U + column]);
+        }
+    }
+    return result;
+}
+
+Mat4 collada_node_transform(const tinyxml2::XMLElement* node)
+{
+    Mat4 local;
+    if (!node) {
+        return local;
+    }
+
+    for (const tinyxml2::XMLElement* child = node->FirstChildElement(); child; child = child->NextSiblingElement()) {
+        const std::string name = xml_local_name(child->Name());
+        if (name == "matrix") {
+            local = multiply(local, row_major_matrix(parse_double_list(xml_text(child))));
+        } else if (name == "translate") {
+            local = multiply(local, translation_matrix(parse_double_list(xml_text(child))));
+        } else if (name == "scale") {
+            local = multiply(local, scale_matrix(parse_double_list(xml_text(child))));
+        } else if (name == "rotate") {
+            local = multiply(local, axis_angle_matrix(parse_double_list(xml_text(child))));
+        }
+    }
+    return local;
 }
 
 Mat4 node_matrix(const tinygltf::Node& node)
@@ -639,6 +1023,839 @@ ModelLoadResult load_gltf_model(const std::filesystem::path& path)
     return result;
 }
 
+const ufbx_material* fbx_material_for_face(
+    const ufbx_node* node,
+    const ufbx_mesh* mesh,
+    std::size_t face_index,
+    int& material_slot)
+{
+    material_slot = -1;
+    if (!node || !mesh) {
+        return nullptr;
+    }
+
+    if (face_index < mesh->face_material.count) {
+        const std::uint32_t slot = mesh->face_material.data[face_index];
+        material_slot = ufbx_typed_id_to_int(slot);
+        if (slot < node->materials.count) {
+            return node->materials.data[slot];
+        }
+        if (slot < mesh->materials.count) {
+            return mesh->materials.data[slot];
+        }
+    }
+
+    if (node->materials.count == 1U) {
+        material_slot = 0;
+        return node->materials.data[0];
+    }
+    if (mesh->materials.count == 1U) {
+        material_slot = 0;
+        return mesh->materials.data[0];
+    }
+    return nullptr;
+}
+
+int texture_index_for_fbx_material(
+    const std::filesystem::path& base_dir,
+    const ufbx_material* material,
+    std::map<const ufbx_texture*, int>& texture_to_index,
+    ModelDocument& document,
+    std::string& warning)
+{
+    const ufbx_texture* texture = diffuse_texture_for_fbx_material(material);
+    if (!texture) {
+        return -1;
+    }
+    if (const auto found = texture_to_index.find(texture); found != texture_to_index.end()) {
+        return found->second;
+    }
+
+    bool ok = false;
+    ModelTexture loaded = load_fbx_texture(base_dir, texture, warning, ok);
+    if (!ok) {
+        return -1;
+    }
+
+    const int document_texture_index = static_cast<int>(document.textures.size());
+    document.textures.push_back(std::move(loaded));
+    texture_to_index.emplace(texture, document_texture_index);
+    return document_texture_index;
+}
+
+void append_fbx_face(
+    const ufbx_node* node,
+    const ufbx_mesh* mesh,
+    ufbx_face face,
+    int texture_index,
+    int material_index,
+    std::string mesh_name,
+    std::string material_name,
+    Bounds& bounds,
+    ModelDocument& document)
+{
+    if (!node || !mesh || face.num_indices < 3U || mesh->max_face_triangles == 0U) {
+        return;
+    }
+
+    std::vector<std::uint32_t> triangle_indices(mesh->max_face_triangles * 3U);
+    const std::uint32_t triangle_count = ufbx_triangulate_face(triangle_indices.data(), triangle_indices.size(), mesh, face);
+    if (triangle_count == 0U) {
+        return;
+    }
+
+    ModelPrimitive primitive;
+    primitive.texture_index = texture_index;
+    primitive.mesh_index = ufbx_typed_id_to_int(mesh->typed_id);
+    primitive.material_index = material_index;
+    primitive.mesh_name = std::move(mesh_name);
+    primitive.material_name = std::move(material_name);
+    primitive.vertices.reserve(static_cast<std::size_t>(triangle_count) * 3U);
+
+    for (std::uint32_t triangle = 0; triangle < triangle_count; ++triangle) {
+        std::array<ModelVertex, 3> vertices{};
+        bool triangle_valid = true;
+        for (std::uint32_t corner = 0; corner < 3U; ++corner) {
+            const std::uint32_t vertex_index = triangle_indices[static_cast<std::size_t>(triangle) * 3U + corner];
+            if (vertex_index >= mesh->vertex_position.indices.count) {
+                triangle_valid = false;
+                break;
+            }
+
+            const ufbx_vec3 local_position = ufbx_get_vertex_vec3(&mesh->vertex_position, vertex_index);
+            const ufbx_vec3 world_position = ufbx_transform_position(&node->geometry_to_world, local_position);
+
+            ModelVertex vertex;
+            vertex.x = static_cast<float>(world_position.x);
+            vertex.y = static_cast<float>(world_position.y);
+            vertex.z = static_cast<float>(world_position.z);
+            if (vertex_index < mesh->vertex_uv.indices.count) {
+                const ufbx_vec2 uv = ufbx_get_vertex_vec2(&mesh->vertex_uv, vertex_index);
+                vertex.u = static_cast<float>(uv.x);
+                vertex.v = 1.0F - static_cast<float>(uv.y);
+            }
+            vertices[corner] = vertex;
+        }
+
+        if (!triangle_valid) {
+            continue;
+        }
+        for (const ModelVertex& vertex : vertices) {
+            include_point(bounds, {vertex.x, vertex.y, vertex.z});
+            primitive.vertices.push_back(vertex);
+        }
+    }
+
+    if (!primitive.vertices.empty()) {
+        document.primitives.push_back(std::move(primitive));
+    }
+}
+
+ModelLoadResult load_fbx_model(const std::filesystem::path& path)
+{
+    ModelLoadResult result;
+    result.model.path = path;
+
+    ufbx_load_opts options = {};
+    options.use_blender_pbr_material = true;
+    ufbx_error error = {};
+    const std::string filename = path.string();
+    std::unique_ptr<ufbx_scene, decltype(&ufbx_free_scene)> scene(
+        ufbx_load_file(filename.c_str(), &options, &error),
+        ufbx_free_scene);
+    if (!scene) {
+        const std::string description = ufbx_error_description(error);
+        result.error = description.empty() ? "Unable to load FBX model." : description;
+        return result;
+    }
+
+    std::map<const ufbx_texture*, int> texture_to_index;
+    Bounds bounds;
+    const std::filesystem::path base_dir = path.parent_path();
+    for (std::size_t node_index = 0; node_index < scene->nodes.count; ++node_index) {
+        const ufbx_node* node = scene->nodes.data[node_index];
+        if (!node || !node->mesh || node->is_root) {
+            continue;
+        }
+
+        const ufbx_mesh* mesh = node->mesh;
+        std::string mesh_name = ufbx_string_to_std(mesh->name);
+        if (mesh_name.empty()) {
+            mesh_name = ufbx_string_to_std(node->name);
+        }
+
+        for (std::size_t face_index = 0; face_index < mesh->faces.count; ++face_index) {
+            int material_slot = -1;
+            const ufbx_material* material = fbx_material_for_face(node, mesh, face_index, material_slot);
+            const int texture_index = texture_index_for_fbx_material(
+                base_dir,
+                material,
+                texture_to_index,
+                result.model,
+                result.warning);
+            if (texture_index < 0) {
+                result.model.used_fallback_texture = true;
+            }
+
+            append_fbx_face(
+                node,
+                mesh,
+                mesh->faces.data[face_index],
+                texture_index,
+                material ? ufbx_typed_id_to_int(material->typed_id) : material_slot,
+                mesh_name,
+                material ? ufbx_string_to_std(material->name) : std::string{},
+                bounds,
+                result.model);
+        }
+    }
+
+    finish_bounds(result.model, bounds);
+    if (result.model.primitives.empty()) {
+        result.error = "The FBX file does not contain supported triangle meshes.";
+    }
+    return result;
+}
+
+ColladaSource parse_collada_source(const tinyxml2::XMLElement* source)
+{
+    ColladaSource parsed;
+    const tinyxml2::XMLElement* float_array = first_child_named(source, "float_array");
+    if (!float_array) {
+        return parsed;
+    }
+
+    const std::vector<double> values = parse_double_list(xml_text(float_array));
+    parsed.values.reserve(values.size());
+    for (double value : values) {
+        parsed.values.push_back(static_cast<float>(value));
+    }
+
+    const tinyxml2::XMLElement* technique = first_child_named(source, "technique_common");
+    const tinyxml2::XMLElement* accessor = first_child_named(technique, "accessor");
+    int stride = 1;
+    int offset = 0;
+    if (accessor) {
+        accessor->QueryIntAttribute("stride", &stride);
+        accessor->QueryIntAttribute("offset", &offset);
+    }
+    parsed.stride = stride > 0 ? static_cast<std::size_t>(stride) : 1U;
+    parsed.offset = offset > 0 ? static_cast<std::size_t>(offset) : 0U;
+    return parsed;
+}
+
+std::vector<ColladaInput> parse_collada_inputs(const tinyxml2::XMLElement* primitive)
+{
+    std::vector<ColladaInput> inputs;
+    for (const tinyxml2::XMLElement* input = first_child_named(primitive, "input"); input;
+         input = next_sibling_named(input, "input")) {
+        ColladaInput parsed;
+        parsed.semantic = xml_attr(input, "semantic");
+        parsed.source = strip_url_id(xml_attr(input, "source"));
+        int offset = 0;
+        input->QueryIntAttribute("offset", &offset);
+        parsed.offset = offset > 0 ? static_cast<std::size_t>(offset) : 0U;
+        inputs.push_back(std::move(parsed));
+    }
+    return inputs;
+}
+
+std::size_t collada_input_stride(const std::vector<ColladaInput>& inputs)
+{
+    std::size_t stride = 0;
+    for (const ColladaInput& input : inputs) {
+        stride = std::max(stride, input.offset + 1U);
+    }
+    return stride;
+}
+
+ColladaGeometry parse_collada_geometry(const tinyxml2::XMLElement* geometry, int geometry_index)
+{
+    ColladaGeometry parsed;
+    parsed.index = geometry_index;
+    parsed.id = xml_attr(geometry, "id");
+    parsed.name = xml_attr(geometry, "name");
+
+    const tinyxml2::XMLElement* mesh = first_child_named(geometry, "mesh");
+    if (!mesh) {
+        return parsed;
+    }
+
+    for (const tinyxml2::XMLElement* source = first_child_named(mesh, "source"); source;
+         source = next_sibling_named(source, "source")) {
+        const std::string id = xml_attr(source, "id");
+        if (!id.empty()) {
+            parsed.sources.emplace(id, parse_collada_source(source));
+        }
+    }
+
+    for (const tinyxml2::XMLElement* vertices = first_child_named(mesh, "vertices"); vertices;
+         vertices = next_sibling_named(vertices, "vertices")) {
+        const std::string vertices_id = xml_attr(vertices, "id");
+        if (vertices_id.empty()) {
+            continue;
+        }
+        for (const tinyxml2::XMLElement* input = first_child_named(vertices, "input"); input;
+             input = next_sibling_named(input, "input")) {
+            if (xml_attr(input, "semantic") == "POSITION") {
+                parsed.vertices_positions[vertices_id] = strip_url_id(xml_attr(input, "source"));
+                break;
+            }
+        }
+    }
+
+    for (const tinyxml2::XMLElement* primitive = mesh->FirstChildElement(); primitive;
+         primitive = primitive->NextSiblingElement()) {
+        const std::string name = xml_local_name(primitive->Name());
+        if (name != "triangles" && name != "polylist") {
+            continue;
+        }
+
+        ColladaPrimitiveData parsed_primitive;
+        parsed_primitive.kind = name == "triangles" ? ColladaPrimitiveKind::Triangles : ColladaPrimitiveKind::Polylist;
+        parsed_primitive.material_symbol = xml_attr(primitive, "material");
+        parsed_primitive.inputs = parse_collada_inputs(primitive);
+        parsed_primitive.indices = parse_int_list(xml_text(first_child_named(primitive, "p")));
+        if (parsed_primitive.kind == ColladaPrimitiveKind::Polylist) {
+            parsed_primitive.vertex_counts = parse_int_list(xml_text(first_child_named(primitive, "vcount")));
+        }
+        parsed.primitives.push_back(std::move(parsed_primitive));
+    }
+
+    return parsed;
+}
+
+std::string collada_effect_diffuse_image(const tinyxml2::XMLElement* effect)
+{
+    const tinyxml2::XMLElement* profile = first_child_named(effect, "profile_COMMON");
+    if (!profile) {
+        return {};
+    }
+
+    std::map<std::string, std::string> surface_images;
+    std::map<std::string, std::string> sampler_surfaces;
+    for (const tinyxml2::XMLElement* newparam = first_child_named(profile, "newparam"); newparam;
+         newparam = next_sibling_named(newparam, "newparam")) {
+        const std::string sid = xml_attr(newparam, "sid");
+        if (sid.empty()) {
+            continue;
+        }
+
+        if (const tinyxml2::XMLElement* surface = first_child_named(newparam, "surface")) {
+            if (const tinyxml2::XMLElement* init_from = first_child_named(surface, "init_from")) {
+                surface_images[sid] = xml_text(init_from);
+            }
+        }
+        if (const tinyxml2::XMLElement* sampler = first_child_named(newparam, "sampler2D")) {
+            if (const tinyxml2::XMLElement* source = first_child_named(sampler, "source")) {
+                sampler_surfaces[sid] = xml_text(source);
+            }
+        }
+    }
+
+    const tinyxml2::XMLElement* technique = first_child_named(profile, "technique");
+    if (!technique) {
+        return {};
+    }
+
+    for (const tinyxml2::XMLElement* shader = technique->FirstChildElement(); shader; shader = shader->NextSiblingElement()) {
+        const tinyxml2::XMLElement* diffuse = first_child_named(shader, "diffuse");
+        const tinyxml2::XMLElement* texture = first_child_named(diffuse, "texture");
+        if (!texture) {
+            continue;
+        }
+
+        const std::string sampler_id = xml_attr(texture, "texture");
+        if (const auto surface = sampler_surfaces.find(sampler_id); surface != sampler_surfaces.end()) {
+            if (const auto image = surface_images.find(surface->second); image != surface_images.end()) {
+                return image->second;
+            }
+        }
+        if (const auto image = surface_images.find(sampler_id); image != surface_images.end()) {
+            return image->second;
+        }
+        return sampler_id;
+    }
+
+    return {};
+}
+
+ColladaDocument parse_collada_document(const tinyxml2::XMLDocument& xml)
+{
+    ColladaDocument parsed;
+    const tinyxml2::XMLElement* root = xml.RootElement();
+    if (!root) {
+        return parsed;
+    }
+
+    const tinyxml2::XMLElement* library_images = first_child_named(root, "library_images");
+    for (const tinyxml2::XMLElement* image = first_child_named(library_images, "image"); image;
+         image = next_sibling_named(image, "image")) {
+        ColladaImage parsed_image;
+        parsed_image.id = xml_attr(image, "id");
+        parsed_image.name = xml_attr(image, "name");
+        parsed_image.uri = xml_text(first_child_named(image, "init_from"));
+        if (!parsed_image.id.empty()) {
+            parsed.images.emplace(parsed_image.id, std::move(parsed_image));
+        }
+    }
+
+    const tinyxml2::XMLElement* library_effects = first_child_named(root, "library_effects");
+    for (const tinyxml2::XMLElement* effect = first_child_named(library_effects, "effect"); effect;
+         effect = next_sibling_named(effect, "effect")) {
+        ColladaEffect parsed_effect;
+        parsed_effect.id = xml_attr(effect, "id");
+        parsed_effect.image_id = collada_effect_diffuse_image(effect);
+        if (!parsed_effect.id.empty()) {
+            parsed.effects.emplace(parsed_effect.id, std::move(parsed_effect));
+        }
+    }
+
+    const tinyxml2::XMLElement* library_materials = first_child_named(root, "library_materials");
+    int material_index = 0;
+    for (const tinyxml2::XMLElement* material = first_child_named(library_materials, "material"); material;
+         material = next_sibling_named(material, "material")) {
+        ColladaMaterial parsed_material;
+        parsed_material.index = material_index++;
+        parsed_material.id = xml_attr(material, "id");
+        parsed_material.name = xml_attr(material, "name");
+        parsed_material.effect_id = strip_url_id(xml_attr(first_child_named(material, "instance_effect"), "url"));
+        if (!parsed_material.id.empty()) {
+            parsed.materials.emplace(parsed_material.id, std::move(parsed_material));
+        }
+    }
+
+    const tinyxml2::XMLElement* library_geometries = first_child_named(root, "library_geometries");
+    int geometry_index = 0;
+    for (const tinyxml2::XMLElement* geometry = first_child_named(library_geometries, "geometry"); geometry;
+         geometry = next_sibling_named(geometry, "geometry")) {
+        ColladaGeometry parsed_geometry = parse_collada_geometry(geometry, geometry_index++);
+        if (!parsed_geometry.id.empty()) {
+            parsed.geometries.emplace(parsed_geometry.id, std::move(parsed_geometry));
+        }
+    }
+
+    std::string scene_id;
+    if (const tinyxml2::XMLElement* scene = first_child_named(root, "scene")) {
+        scene_id = strip_url_id(xml_attr(first_child_named(scene, "instance_visual_scene"), "url"));
+    }
+    const tinyxml2::XMLElement* library_visual_scenes = first_child_named(root, "library_visual_scenes");
+    for (const tinyxml2::XMLElement* visual_scene = first_child_named(library_visual_scenes, "visual_scene"); visual_scene;
+         visual_scene = next_sibling_named(visual_scene, "visual_scene")) {
+        if (scene_id.empty() || xml_attr(visual_scene, "id") == scene_id) {
+            parsed.visual_scene = visual_scene;
+            break;
+        }
+    }
+
+    return parsed;
+}
+
+const ColladaSource* collada_source_for_input(const ColladaGeometry& geometry, const ColladaInput& input)
+{
+    std::string source_id = input.source;
+    if (input.semantic == "VERTEX") {
+        const auto found = geometry.vertices_positions.find(input.source);
+        if (found == geometry.vertices_positions.end()) {
+            return nullptr;
+        }
+        source_id = found->second;
+    }
+
+    const auto source = geometry.sources.find(source_id);
+    return source == geometry.sources.end() ? nullptr : &source->second;
+}
+
+float read_collada_source_float(const ColladaSource& source, int index, std::size_t component)
+{
+    if (index < 0) {
+        return 0.0F;
+    }
+
+    const std::size_t offset = source.offset + static_cast<std::size_t>(index) * source.stride + component;
+    if (offset >= source.values.size()) {
+        return 0.0F;
+    }
+    return source.values[offset];
+}
+
+const ColladaInput* find_collada_input(const std::vector<ColladaInput>& inputs, std::string_view semantic)
+{
+    for (const ColladaInput& input : inputs) {
+        if (input.semantic == semantic) {
+            return &input;
+        }
+    }
+    return nullptr;
+}
+
+bool build_collada_vertex(
+    const ColladaGeometry& geometry,
+    const ColladaPrimitiveData& primitive,
+    std::size_t tuple,
+    std::size_t input_stride,
+    Mat4 transform,
+    ModelVertex& vertex)
+{
+    const ColladaInput* position_input = find_collada_input(primitive.inputs, "VERTEX");
+    if (!position_input) {
+        position_input = find_collada_input(primitive.inputs, "POSITION");
+    }
+    if (!position_input || position_input->offset >= input_stride) {
+        return false;
+    }
+
+    const std::size_t position_index_offset = tuple * input_stride + position_input->offset;
+    if (position_index_offset >= primitive.indices.size()) {
+        return false;
+    }
+
+    const ColladaSource* position_source = collada_source_for_input(geometry, *position_input);
+    if (!position_source) {
+        return false;
+    }
+
+    const int position_index = primitive.indices[position_index_offset];
+    const std::array<float, 3> local = {
+        read_collada_source_float(*position_source, position_index, 0),
+        read_collada_source_float(*position_source, position_index, 1),
+        read_collada_source_float(*position_source, position_index, 2),
+    };
+    const std::array<float, 3> world = transform_point(transform, local);
+    vertex.x = world[0];
+    vertex.y = world[1];
+    vertex.z = world[2];
+
+    const ColladaInput* texcoord_input = find_collada_input(primitive.inputs, "TEXCOORD");
+    if (texcoord_input && texcoord_input->offset < input_stride) {
+        const std::size_t texcoord_index_offset = tuple * input_stride + texcoord_input->offset;
+        if (texcoord_index_offset < primitive.indices.size()) {
+            if (const ColladaSource* texcoord_source = collada_source_for_input(geometry, *texcoord_input)) {
+                const int texcoord_index = primitive.indices[texcoord_index_offset];
+                vertex.u = read_collada_source_float(*texcoord_source, texcoord_index, 0);
+                vertex.v = 1.0F - read_collada_source_float(*texcoord_source, texcoord_index, 1);
+            }
+        }
+    }
+
+    return true;
+}
+
+ModelTexture load_collada_texture(
+    const std::filesystem::path& base_dir,
+    const ColladaImage& source,
+    std::string& warning,
+    bool& ok)
+{
+    ok = false;
+    if (source.uri.empty()) {
+        add_warning(warning, "COLLADA texture has no image file reference; using fallback.");
+        return {};
+    }
+
+    std::string uri = source.uri;
+    constexpr std::string_view kFilePrefix = "file://";
+    if (uri.rfind(kFilePrefix, 0) == 0) {
+        uri.erase(0, kFilePrefix.size());
+        if (uri.size() >= 3U && uri[0] == '/' && std::isalpha(static_cast<unsigned char>(uri[1])) && uri[2] == ':') {
+            uri.erase(uri.begin());
+        }
+    }
+
+    const std::filesystem::path texture_path = external_texture_path(base_dir, uri);
+    ImageLoadResult loaded = load_image_rgba(texture_path.string());
+    if (!loaded.error.empty()) {
+        add_warning(warning, "Texture " + texture_path.filename().string() + " could not be loaded; using fallback.");
+        return {};
+    }
+
+    ModelTexture texture;
+    texture.name = file_name_or(texture_path, source.name.empty() ? source.uri : source.name);
+    texture.source_path = texture_path;
+    texture.embedded = false;
+    texture.image = std::move(loaded.image);
+    ok = true;
+    return texture;
+}
+
+int texture_index_for_collada_material(
+    const std::filesystem::path& base_dir,
+    const ColladaDocument& source,
+    const std::string& material_id,
+    std::map<std::string, int>& image_to_texture,
+    ModelDocument& document,
+    std::string& warning)
+{
+    const auto material = source.materials.find(material_id);
+    if (material == source.materials.end()) {
+        return -1;
+    }
+    const auto effect = source.effects.find(material->second.effect_id);
+    if (effect == source.effects.end() || effect->second.image_id.empty()) {
+        return -1;
+    }
+    const auto image = source.images.find(effect->second.image_id);
+    if (image == source.images.end()) {
+        return -1;
+    }
+
+    const std::string key = image->second.id.empty() ? image->second.uri : image->second.id;
+    if (const auto found = image_to_texture.find(key); found != image_to_texture.end()) {
+        return found->second;
+    }
+
+    bool ok = false;
+    ModelTexture texture = load_collada_texture(base_dir, image->second, warning, ok);
+    if (!ok) {
+        return -1;
+    }
+
+    const int document_texture_index = static_cast<int>(document.textures.size());
+    document.textures.push_back(std::move(texture));
+    image_to_texture.emplace(key, document_texture_index);
+    return document_texture_index;
+}
+
+std::string collada_material_id_for_symbol(
+    const ColladaDocument& source,
+    const std::map<std::string, std::string>& material_bindings,
+    const std::string& symbol)
+{
+    if (const auto found = material_bindings.find(symbol); found != material_bindings.end()) {
+        return found->second;
+    }
+    if (source.materials.contains(symbol)) {
+        return symbol;
+    }
+    return {};
+}
+
+void append_collada_triangle(
+    const ColladaGeometry& geometry,
+    const ColladaPrimitiveData& source,
+    std::array<std::size_t, 3> tuples,
+    std::size_t input_stride,
+    Mat4 transform,
+    ModelPrimitive& primitive,
+    Bounds& bounds)
+{
+    std::array<ModelVertex, 3> vertices{};
+    for (std::size_t index = 0; index < vertices.size(); ++index) {
+        if (!build_collada_vertex(geometry, source, tuples[index], input_stride, transform, vertices[index])) {
+            return;
+        }
+    }
+
+    for (const ModelVertex& vertex : vertices) {
+        include_point(bounds, {vertex.x, vertex.y, vertex.z});
+        primitive.vertices.push_back(vertex);
+    }
+}
+
+void append_collada_geometry(
+    const ColladaDocument& source,
+    const ColladaGeometry& geometry,
+    Mat4 transform,
+    const std::map<std::string, std::string>& material_bindings,
+    const std::filesystem::path& base_dir,
+    std::map<std::string, int>& image_to_texture,
+    Bounds& bounds,
+    std::string& warning,
+    ModelDocument& document)
+{
+    const std::string mesh_name = geometry.name.empty() ? geometry.id : geometry.name;
+    for (const ColladaPrimitiveData& source_primitive : geometry.primitives) {
+        const std::size_t input_stride = collada_input_stride(source_primitive.inputs);
+        if (input_stride == 0U || source_primitive.indices.empty()) {
+            continue;
+        }
+
+        const std::string material_id = collada_material_id_for_symbol(
+            source,
+            material_bindings,
+            source_primitive.material_symbol);
+        const int texture_index = texture_index_for_collada_material(
+            base_dir,
+            source,
+            material_id,
+            image_to_texture,
+            document,
+            warning);
+        if (texture_index < 0) {
+            document.used_fallback_texture = true;
+        }
+
+        ModelPrimitive primitive;
+        primitive.texture_index = texture_index;
+        primitive.mesh_index = geometry.index;
+        primitive.mesh_name = mesh_name;
+        if (const auto material = source.materials.find(material_id); material != source.materials.end()) {
+            primitive.material_index = material->second.index;
+            primitive.material_name = material->second.name.empty() ? material_id : material->second.name;
+        }
+
+        if (source_primitive.kind == ColladaPrimitiveKind::Triangles) {
+            const std::size_t tuple_count = source_primitive.indices.size() / input_stride;
+            primitive.vertices.reserve(tuple_count);
+            for (std::size_t tuple = 0; tuple + 2U < tuple_count; tuple += 3U) {
+                append_collada_triangle(
+                    geometry,
+                    source_primitive,
+                    {tuple, tuple + 1U, tuple + 2U},
+                    input_stride,
+                    transform,
+                    primitive,
+                    bounds);
+            }
+        } else {
+            std::size_t tuple = 0;
+            for (const int vertex_count : source_primitive.vertex_counts) {
+                if (vertex_count >= 3) {
+                    primitive.vertices.reserve(
+                        primitive.vertices.size() + static_cast<std::size_t>((vertex_count - 2) * 3));
+                    for (int corner = 1; corner + 1 < vertex_count; ++corner) {
+                        append_collada_triangle(
+                            geometry,
+                            source_primitive,
+                            {
+                                tuple,
+                                tuple + static_cast<std::size_t>(corner),
+                                tuple + static_cast<std::size_t>(corner + 1),
+                            },
+                            input_stride,
+                            transform,
+                            primitive,
+                            bounds);
+                    }
+                }
+                if (vertex_count > 0) {
+                    tuple += static_cast<std::size_t>(vertex_count);
+                }
+            }
+        }
+
+        if (!primitive.vertices.empty()) {
+            document.primitives.push_back(std::move(primitive));
+        }
+    }
+}
+
+std::map<std::string, std::string> collada_material_bindings(const tinyxml2::XMLElement* instance_geometry)
+{
+    std::map<std::string, std::string> bindings;
+    const tinyxml2::XMLElement* bind_material = first_child_named(instance_geometry, "bind_material");
+    const tinyxml2::XMLElement* technique = first_child_named(bind_material, "technique_common");
+    for (const tinyxml2::XMLElement* instance_material = first_child_named(technique, "instance_material");
+         instance_material;
+         instance_material = next_sibling_named(instance_material, "instance_material")) {
+        const std::string target = strip_url_id(xml_attr(instance_material, "target"));
+        if (target.empty()) {
+            continue;
+        }
+
+        const std::string symbol = xml_attr(instance_material, "symbol");
+        bindings[symbol.empty() ? target : symbol] = target;
+    }
+    return bindings;
+}
+
+void append_collada_node(
+    const ColladaDocument& source,
+    const tinyxml2::XMLElement* node,
+    Mat4 parent_transform,
+    const std::filesystem::path& base_dir,
+    std::map<std::string, int>& image_to_texture,
+    Bounds& bounds,
+    std::string& warning,
+    ModelDocument& document)
+{
+    if (!node) {
+        return;
+    }
+
+    const Mat4 transform = multiply(parent_transform, collada_node_transform(node));
+    for (const tinyxml2::XMLElement* instance_geometry = first_child_named(node, "instance_geometry"); instance_geometry;
+         instance_geometry = next_sibling_named(instance_geometry, "instance_geometry")) {
+        const std::string geometry_id = strip_url_id(xml_attr(instance_geometry, "url"));
+        const auto geometry = source.geometries.find(geometry_id);
+        if (geometry == source.geometries.end()) {
+            continue;
+        }
+
+        append_collada_geometry(
+            source,
+            geometry->second,
+            transform,
+            collada_material_bindings(instance_geometry),
+            base_dir,
+            image_to_texture,
+            bounds,
+            warning,
+            document);
+    }
+
+    for (const tinyxml2::XMLElement* child = first_child_named(node, "node"); child;
+         child = next_sibling_named(child, "node")) {
+        append_collada_node(source, child, transform, base_dir, image_to_texture, bounds, warning, document);
+    }
+}
+
+ModelLoadResult load_collada_model(const std::filesystem::path& path)
+{
+    ModelLoadResult result;
+    result.model.path = path;
+
+    tinyxml2::XMLDocument xml;
+    const tinyxml2::XMLError error = xml.LoadFile(path.string().c_str());
+    if (error != tinyxml2::XML_SUCCESS) {
+        result.error = xml.ErrorStr() ? std::string("Unable to load COLLADA model: ") + xml.ErrorStr()
+                                      : "Unable to load COLLADA model.";
+        return result;
+    }
+
+    const ColladaDocument source = parse_collada_document(xml);
+    const std::filesystem::path base_dir = path.parent_path();
+    std::map<std::string, int> image_to_texture;
+    Bounds bounds;
+    const Mat4 identity;
+
+    if (source.visual_scene) {
+        for (const tinyxml2::XMLElement* node = first_child_named(source.visual_scene, "node"); node;
+             node = next_sibling_named(node, "node")) {
+            append_collada_node(
+                source,
+                node,
+                identity,
+                base_dir,
+                image_to_texture,
+                bounds,
+                result.warning,
+                result.model);
+        }
+    } else {
+        const std::map<std::string, std::string> material_bindings;
+        for (const auto& [id, geometry] : source.geometries) {
+            (void)id;
+            append_collada_geometry(
+                source,
+                geometry,
+                identity,
+                material_bindings,
+                base_dir,
+                image_to_texture,
+                bounds,
+                result.warning,
+                result.model);
+        }
+    }
+
+    finish_bounds(result.model, bounds);
+    if (result.model.primitives.empty()) {
+        result.error = "The COLLADA file does not contain supported triangle meshes.";
+    }
+    return result;
+}
+
 ModelTexture load_obj_texture(
     const std::filesystem::path& base_dir,
     const std::string& diffuse_name,
@@ -796,7 +2013,8 @@ ModelLoadResult load_obj_model(const std::filesystem::path& path)
 bool is_model_path(const std::filesystem::path& path)
 {
     const std::string extension = lower_extension(path);
-    return extension == ".glb" || extension == ".gltf" || extension == ".obj";
+    return extension == ".glb" || extension == ".gltf" || extension == ".obj" || extension == ".fbx"
+        || extension == ".dae";
 }
 
 ModelLoadResult load_model_document(const std::filesystem::path& path)
@@ -807,6 +2025,12 @@ ModelLoadResult load_model_document(const std::filesystem::path& path)
     }
     if (extension == ".obj") {
         return load_obj_model(path);
+    }
+    if (extension == ".fbx") {
+        return load_fbx_model(path);
+    }
+    if (extension == ".dae") {
+        return load_collada_model(path);
     }
 
     ModelLoadResult result;

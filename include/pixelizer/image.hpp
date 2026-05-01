@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,7 @@ struct ImageLoadResult {
 };
 
 ImageLoadResult load_image_rgba(const std::string& path);
+ImageLoadResult load_image_rgba_memory(const std::uint8_t* bytes, std::size_t byte_count);
 bool save_png_rgba(const std::string& path, const Image& image, std::string& error);
 bool save_raw_indexed(
     const std::string& path,

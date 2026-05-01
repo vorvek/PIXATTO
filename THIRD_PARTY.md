@@ -7,6 +7,8 @@ Pixelizer fetches these dependencies at configure time and links them into the d
 - stb at commit `31c1ad37456438565541f4919958214b6e762fb4` from `nothings/stb`, using its public-domain/MIT dual license.
 - tinygltf `v2.9.7` from `syoyo/tinygltf`, under the MIT license.
 - tinyobjloader `v2.0.0rc13` from `tinyobjloader/tinyobjloader`, under the MIT license.
+- ufbx `v0.21.3` from `ufbx/ufbx`, using its MIT license option.
+- tinyxml2 `11.0.0` from `leethomason/tinyxml2`, under the zlib license.
 
 Pixelizer bundles these default palette files from Lospec. Links point to the original palette pages:
 

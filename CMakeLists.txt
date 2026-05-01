@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Pixelizer VERSION 1.6.0 LANGUAGES C CXX)
+project(Pixelizer VERSION 1.6.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -108,6 +108,20 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 
+FetchContent_Declare(
+    ufbx
+    GIT_REPOSITORY https://github.com/ufbx/ufbx.git
+    GIT_TAG v0.21.3
+    GIT_SHALLOW TRUE
+)
+
+FetchContent_Declare(
+    tinyxml2
+    GIT_REPOSITORY https://github.com/leethomason/tinyxml2.git
+    GIT_TAG 11.0.0
+    GIT_SHALLOW TRUE
+)
+
 FetchContent_MakeAvailable(SDL3 imgui stb)
 if(POLICY CMP0169)
     cmake_policy(PUSH)
@@ -120,6 +134,14 @@ endif()
 FetchContent_GetProperties(tinyobjloader)
 if(NOT tinyobjloader_POPULATED)
     FetchContent_Populate(tinyobjloader)
+endif()
+FetchContent_GetProperties(ufbx)
+if(NOT ufbx_POPULATED)
+    FetchContent_Populate(ufbx)
+endif()
+FetchContent_GetProperties(tinyxml2)
+if(NOT tinyxml2_POPULATED)
+    FetchContent_Populate(tinyxml2)
 endif()
 if(POLICY CMP0169)
     cmake_policy(POP)
@@ -152,6 +174,28 @@ target_include_directories(imgui
 
 target_link_libraries(imgui PUBLIC ${PIXELIZER_SDL_TARGET})
 pixelizer_enable_release_sections(imgui)
+
+add_library(ufbx STATIC
+    ${ufbx_SOURCE_DIR}/ufbx.c
+)
+
+set_target_properties(ufbx PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON)
+
+target_include_directories(ufbx
+    PUBLIC
+        ${ufbx_SOURCE_DIR}
+)
+pixelizer_enable_release_sections(ufbx)
+
+add_library(tinyxml2 STATIC
+    ${tinyxml2_SOURCE_DIR}/tinyxml2.cpp
+)
+
+target_include_directories(tinyxml2
+    PUBLIC
+        ${tinyxml2_SOURCE_DIR}
+)
+pixelizer_enable_release_sections(tinyxml2)
 
 set(PIXELIZER_APP_SOURCES
     src/app.cpp
@@ -195,6 +239,8 @@ target_link_libraries(pixelizer
         ${PIXELIZER_SDL_TARGET}
         imgui
         OpenGL::GL
+        ufbx
+        tinyxml2
 )
 
 if(TARGET SDL3-static)
@@ -297,6 +343,14 @@ target_include_directories(pixelizer_model_tests
         ${stb_SOURCE_DIR}
         ${tinygltf_SOURCE_DIR}
         ${tinyobjloader_SOURCE_DIR}
+        ${ufbx_SOURCE_DIR}
+        ${tinyxml2_SOURCE_DIR}
+)
+
+target_link_libraries(pixelizer_model_tests
+    PRIVATE
+        ufbx
+        tinyxml2
 )
 
 if(MSVC)

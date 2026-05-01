@@ -479,6 +479,37 @@ ImageLoadResult load_image_rgba(const std::string& path)
     return result;
 }
 
+ImageLoadResult load_image_rgba_memory(const std::uint8_t* bytes, std::size_t byte_count)
+{
+    ImageLoadResult result;
+    if (!bytes || byte_count == 0U || byte_count > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        result.error = "Unable to load image.";
+        return result;
+    }
+
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    stbi_uc* pixels = stbi_load_from_memory(
+        bytes,
+        static_cast<int>(byte_count),
+        &width,
+        &height,
+        &channels,
+        4);
+    if (!pixels) {
+        result.error = stbi_failure_reason() ? stbi_failure_reason() : "Unable to load image.";
+        return result;
+    }
+
+    const std::size_t pixel_count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    result.image.width = width;
+    result.image.height = height;
+    result.image.rgba.assign(pixels, pixels + pixel_count * 4U);
+    stbi_image_free(pixels);
+    return result;
+}
+
 bool save_png_rgba(const std::string& path, const Image& image, std::string& error)
 {
     std::size_t pixels = 0;

@@ -70,6 +70,8 @@ enum class TextId {
     AboutDependencyStb,
     AboutDependencyTinyGltf,
     AboutDependencyTinyObj,
+    AboutDependencyUfbx,
+    AboutDependencyTinyXml,
     AboutPalettesTitle,
     AboutPalettesCredit,
     AboutAssetsCredit,

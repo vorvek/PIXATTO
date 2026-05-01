@@ -23,7 +23,8 @@ bool has_extension(const std::filesystem::path& path, const char* extension)
 
 bool is_model_path(const std::filesystem::path& path)
 {
-    return has_extension(path, ".glb") || has_extension(path, ".gltf") || has_extension(path, ".obj");
+    return has_extension(path, ".glb") || has_extension(path, ".gltf") || has_extension(path, ".obj")
+        || has_extension(path, ".fbx") || has_extension(path, ".dae");
 }
 
 struct PendingDialog {
@@ -142,7 +143,7 @@ bool FileCommandPump::request_open_model_dialog(SDL_Window* window, const FileDi
         window,
         FileCommandKind::OpenModel,
         {labels.models_filter, labels.all_files_filter},
-        {"glb;gltf;obj", "*"},
+        {"glb;gltf;obj;fbx;dae", "*"},
         false);
 }
 
