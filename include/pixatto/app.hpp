@@ -1,13 +1,13 @@
 #pragma once
 
-#include "pixelizer/file_command_pump.hpp"
-#include "pixelizer/image.hpp"
-#include "pixelizer/localization.hpp"
-#include "pixelizer/model.hpp"
-#include "pixelizer/model_renderer.hpp"
-#include "pixelizer/palette.hpp"
-#include "pixelizer/preset.hpp"
-#include "pixelizer/processing_edit_session.hpp"
+#include "pixatto/file_command_pump.hpp"
+#include "pixatto/image.hpp"
+#include "pixatto/localization.hpp"
+#include "pixatto/model.hpp"
+#include "pixatto/model_renderer.hpp"
+#include "pixatto/palette.hpp"
+#include "pixatto/preset.hpp"
+#include "pixatto/processing_edit_session.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -22,7 +22,7 @@
 #include <string_view>
 #include <vector>
 
-namespace pixelizer {
+namespace pixatto {
 
 class App {
 public:
@@ -303,4 +303,4 @@ private:
     std::optional<BatchState> batch_;
 };
 
-} // namespace pixelizer
+} // namespace pixatto

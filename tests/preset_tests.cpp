@@ -1,6 +1,7 @@
-#include "pixelizer/preset.hpp"
+#include "pixatto/preset.hpp"
 
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -16,17 +17,17 @@ void require(bool condition)
 
 std::filesystem::path test_dir()
 {
-    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "pixelizer-preset-tests";
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "pixatto-preset-tests";
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
     return dir;
 }
 
-pixelizer::ProcessSettings sample_settings()
+pixatto::ProcessSettings sample_settings()
 {
-    pixelizer::ProcessSettings settings;
+    pixatto::ProcessSettings settings;
     settings.pixel_size = 13;
-    settings.block_color_mode = pixelizer::BlockColorMode::Average;
+    settings.block_color_mode = pixatto::BlockColorMode::Average;
     settings.use_palette = true;
     settings.preserve_transparency = true;
     settings.palette = {
@@ -35,7 +36,7 @@ pixelizer::ProcessSettings sample_settings()
     };
     settings.color_levels = 5;
     settings.reduction_max_colors = 17;
-    settings.dither_mode = pixelizer::DitherMode::Atkinson;
+    settings.dither_mode = pixatto::DitherMode::Atkinson;
     settings.bayer_matrix_size = 16;
     settings.dither_amount = 0.35F;
     settings.blue_noise_seed = 42;
@@ -55,16 +56,16 @@ pixelizer::ProcessSettings sample_settings()
 void preset_round_trips_settings()
 {
     const std::filesystem::path dir = test_dir();
-    const pixelizer::ProcessSettings settings = sample_settings();
+    const pixatto::ProcessSettings settings = sample_settings();
 
-    pixelizer::Preset saved;
+    pixatto::Preset saved;
     std::string error;
-    require(pixelizer::save_preset_to_dir(dir, "Crunchy #4", settings, pixelizer::PresetSaveMode::Create, saved, error));
+    require(pixatto::save_preset_to_dir(dir, "Crunchy #4", settings, pixatto::PresetSaveMode::Create, saved, error));
     require(saved.name == "Crunchy #4");
     require(saved.settings == settings);
 
-    pixelizer::Preset loaded;
-    require(pixelizer::load_preset_file(saved.path, loaded, error));
+    pixatto::Preset loaded;
+    require(pixatto::load_preset_file(saved.path, loaded, error));
     require(loaded.name == "Crunchy #4");
     require(loaded.settings == settings);
 }
@@ -72,31 +73,31 @@ void preset_round_trips_settings()
 void create_refuses_existing_preset_until_overwrite()
 {
     const std::filesystem::path dir = test_dir();
-    pixelizer::ProcessSettings first = sample_settings();
-    pixelizer::ProcessSettings second = first;
+    pixatto::ProcessSettings first = sample_settings();
+    pixatto::ProcessSettings second = first;
     second.pixel_size = 21;
-    second.dither_mode = pixelizer::DitherMode::BlueNoise;
+    second.dither_mode = pixatto::DitherMode::BlueNoise;
 
-    pixelizer::Preset saved;
+    pixatto::Preset saved;
     std::string error;
-    require(pixelizer::save_preset_to_dir(dir, "Shared Name", first, pixelizer::PresetSaveMode::Create, saved, error));
-    require(pixelizer::find_preset_conflict_in_dir(dir, "Shared Name").has_value());
-    require(!pixelizer::save_preset_to_dir(dir, "Shared Name", second, pixelizer::PresetSaveMode::Create, saved, error));
-    require(pixelizer::save_preset_to_dir(dir, "Shared Name", second, pixelizer::PresetSaveMode::Overwrite, saved, error));
+    require(pixatto::save_preset_to_dir(dir, "Shared Name", first, pixatto::PresetSaveMode::Create, saved, error));
+    require(pixatto::find_preset_conflict_in_dir(dir, "Shared Name").has_value());
+    require(!pixatto::save_preset_to_dir(dir, "Shared Name", second, pixatto::PresetSaveMode::Create, saved, error));
+    require(pixatto::save_preset_to_dir(dir, "Shared Name", second, pixatto::PresetSaveMode::Overwrite, saved, error));
     require(saved.settings == second);
 }
 
 void saved_presets_are_sorted_by_name()
 {
     const std::filesystem::path dir = test_dir();
-    const pixelizer::ProcessSettings settings = sample_settings();
-    pixelizer::Preset saved;
+    const pixatto::ProcessSettings settings = sample_settings();
+    pixatto::Preset saved;
     std::string error;
 
-    require(pixelizer::save_preset_to_dir(dir, "zeta", settings, pixelizer::PresetSaveMode::Create, saved, error));
-    require(pixelizer::save_preset_to_dir(dir, "Alpha", settings, pixelizer::PresetSaveMode::Create, saved, error));
+    require(pixatto::save_preset_to_dir(dir, "zeta", settings, pixatto::PresetSaveMode::Create, saved, error));
+    require(pixatto::save_preset_to_dir(dir, "Alpha", settings, pixatto::PresetSaveMode::Create, saved, error));
 
-    const std::vector<pixelizer::Preset> presets = pixelizer::load_presets_from_dir(dir);
+    const std::vector<pixatto::Preset> presets = pixatto::load_presets_from_dir(dir);
     require(presets.size() == 2U);
     require(presets[0].name == "Alpha");
     require(presets[1].name == "zeta");
@@ -105,13 +106,31 @@ void saved_presets_are_sorted_by_name()
 void preset_files_can_be_deleted()
 {
     const std::filesystem::path dir = test_dir();
-    pixelizer::Preset saved;
+    pixatto::Preset saved;
     std::string error;
-    require(pixelizer::save_preset_to_dir(dir, "Temporary", sample_settings(), pixelizer::PresetSaveMode::Create, saved, error));
+    require(pixatto::save_preset_to_dir(dir, "Temporary", sample_settings(), pixatto::PresetSaveMode::Create, saved, error));
     require(std::filesystem::exists(saved.path));
-    require(pixelizer::delete_preset_file(saved, error));
+    require(pixatto::delete_preset_file(saved, error));
     require(!std::filesystem::exists(saved.path));
-    require(pixelizer::load_presets_from_dir(dir).empty());
+    require(pixatto::load_presets_from_dir(dir).empty());
+}
+
+void legacy_pixelizer_preset_version_key_still_loads()
+{
+    const std::filesystem::path dir = test_dir();
+    const std::filesystem::path path = dir / "legacy.pxpreset";
+    {
+        std::ofstream output(path);
+        output << "pixelizer_preset=1\n";
+        output << "name=Legacy Look\n";
+        output << "pixel_size=7\n";
+    }
+
+    pixatto::Preset loaded;
+    std::string error;
+    require(pixatto::load_preset_file(path, loaded, error));
+    require(loaded.name == "Legacy Look");
+    require(loaded.settings.pixel_size == 7);
 }
 
 } // namespace
@@ -122,5 +141,6 @@ int main()
     create_refuses_existing_preset_until_overwrite();
     saved_presets_are_sorted_by_name();
     preset_files_can_be_deleted();
+    legacy_pixelizer_preset_version_key_still_loads();
     return 0;
 }

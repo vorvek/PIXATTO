@@ -1,4 +1,4 @@
-#include "pixelizer/preset.hpp"
+#include "pixatto/preset.hpp"
 
 #include <SDL3/SDL_filesystem.h>
 
@@ -19,24 +19,65 @@
 #include <utility>
 #include <vector>
 
-namespace pixelizer {
+namespace pixatto {
 namespace {
 
 constexpr std::string_view kPresetExtension = ".pxpreset";
-constexpr std::string_view kPresetVersionKey = "pixelizer_preset";
+constexpr std::string_view kPresetVersionKey = "pixatto_preset";
+constexpr std::string_view kLegacyPresetVersionKey = "pixelizer_preset";
 constexpr std::string_view kPresetVersion = "1";
 constexpr std::size_t kMaxPresetPaletteColors = 256;
 
-std::filesystem::path preset_dir()
+constexpr const char* kPreferenceOrganization = "Codex";
+constexpr const char* kPreferenceAppName = "Pixatto";
+constexpr const char* kLegacyPreferenceAppName = "Pixelizer";
+
+std::optional<std::filesystem::path> preference_base_dir(const char* app_name)
 {
-    char* pref = SDL_GetPrefPath("Codex", "Pixelizer");
+    char* pref = SDL_GetPrefPath(kPreferenceOrganization, app_name);
     if (!pref) {
-        return std::filesystem::current_path() / "presets";
+        return std::nullopt;
     }
 
     std::filesystem::path base(pref);
     SDL_free(pref);
-    return base / "presets";
+    return base;
+}
+
+void copy_legacy_dir_if_needed(const std::filesystem::path& target, const std::filesystem::path& legacy)
+{
+    std::error_code ec;
+    if (std::filesystem::exists(target, ec) || ec) {
+        return;
+    }
+
+    ec.clear();
+    if (!std::filesystem::exists(legacy, ec) || ec) {
+        return;
+    }
+
+    ec.clear();
+    std::filesystem::create_directories(target.parent_path(), ec);
+    if (ec) {
+        return;
+    }
+
+    ec.clear();
+    std::filesystem::copy(legacy, target, std::filesystem::copy_options::recursive | std::filesystem::copy_options::skip_existing, ec);
+}
+
+std::filesystem::path preset_dir()
+{
+    const auto base = preference_base_dir(kPreferenceAppName);
+    if (!base) {
+        return std::filesystem::current_path() / "presets";
+    }
+
+    const std::filesystem::path dir = *base / "presets";
+    if (const auto legacy_base = preference_base_dir(kLegacyPreferenceAppName)) {
+        copy_legacy_dir_if_needed(dir, *legacy_base / "presets");
+    }
+    return dir;
 }
 
 std::string trim(std::string value)
@@ -436,9 +477,14 @@ std::optional<std::string> find_entry(const std::vector<PresetEntry>& entries, s
     return std::nullopt;
 }
 
+bool is_preset_version_key(std::string_view key)
+{
+    return key == kPresetVersionKey || key == kLegacyPresetVersionKey;
+}
+
 bool apply_entry(ProcessSettings& settings, const PresetEntry& entry, std::string& error)
 {
-    if (entry.key == kPresetVersionKey || entry.key == "name") {
+    if (is_preset_version_key(entry.key) || entry.key == "name") {
         return true;
     }
 
@@ -529,7 +575,10 @@ bool load_preset_file(const std::filesystem::path& path, Preset& preset, std::st
         return false;
     }
 
-    const std::optional<std::string> version = find_entry(entries, kPresetVersionKey);
+    std::optional<std::string> version = find_entry(entries, kPresetVersionKey);
+    if (!version) {
+        version = find_entry(entries, kLegacyPresetVersionKey);
+    }
     if (!version || *version != kPresetVersion) {
         error = "Unsupported preset version.";
         return false;
@@ -688,4 +737,4 @@ bool save_preset_as(
     return save_preset_to_dir(preset_dir(), name, settings, mode, saved, error);
 }
 
-} // namespace pixelizer
+} // namespace pixatto

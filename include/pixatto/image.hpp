@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace pixelizer {
+namespace pixatto {
 
 struct Color32 {
     std::uint8_t r = 0;
@@ -47,4 +47,4 @@ bool save_raw_indexed(
     const std::vector<Color32>& preferred_palette,
     std::string& error);
 
-} // namespace pixelizer
+} // namespace pixatto

@@ -1,4 +1,4 @@
-#include "pixelizer/localization.hpp"
+#include "pixatto/localization.hpp"
 
 #include <algorithm>
 #include <array>
@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace pixelizer {
+namespace pixatto {
 namespace {
 
 struct Translation {
@@ -45,9 +45,9 @@ constexpr std::array<LanguageDefinition, kLanguageCount> kLanguages = {{
 constexpr Translation kEnglish[] = {
     {TextId::LanguageWindowTitle, "Language"},
     {TextId::ChooseLanguage, "Choose a language"},
-    {TextId::AboutWindowTitle, "About Pixelizer"},
+    {TextId::AboutWindowTitle, "About Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "About Pixelizer"},
+    {TextId::AboutButtonTooltip, "About Pixatto"},
     {TextId::HelpWindowTitle, "Help"},
     {TextId::HelpButtonLabel, "?"},
     {TextId::HelpButtonTooltip, "Help and controls"},
@@ -65,7 +65,7 @@ constexpr Translation kEnglish[] = {
     {TextId::HelpModelOrigin, "Origin: center the model preview around world 0,0,0."},
     {TextId::HelpTextureAssign, "Drag a texture from the drawer onto a material slot to assign it."},
     {TextId::HelpDragDropFiles, "Drag image, palette, GLB/glTF, OBJ, FBX, or DAE files onto the window to import them."},
-    {TextId::AboutProjectCredit, "Pixelizer by Jon Tamayo"},
+    {TextId::AboutProjectCredit, "Pixatto by Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. Released under the MIT License."},
     {TextId::AboutThirdPartyTitle, "Third-party licenses and credits"},
     {TextId::AboutDependenciesTitle, "Dependencies"},
@@ -294,9 +294,9 @@ constexpr Translation kEnglish[] = {
 constexpr Translation kSpanish[] = {
     {TextId::LanguageWindowTitle, "Idioma"},
     {TextId::ChooseLanguage, "Elige un idioma"},
-    {TextId::AboutWindowTitle, "Acerca de Pixelizer"},
+    {TextId::AboutWindowTitle, "Acerca de Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "Acerca de Pixelizer"},
+    {TextId::AboutButtonTooltip, "Acerca de Pixatto"},
     {TextId::HelpWindowTitle, "Ayuda"},
     {TextId::HelpButtonLabel, "?"},
     {TextId::HelpButtonTooltip, "Ayuda y controles"},
@@ -314,7 +314,7 @@ constexpr Translation kSpanish[] = {
     {TextId::HelpModelOrigin, "Origen: centrar la vista del modelo alrededor del punto 0,0,0."},
     {TextId::HelpTextureAssign, "Arrastra una textura desde el cajón hasta un material para asignarla."},
     {TextId::HelpDragDropFiles, "Arrastra imágenes, paletas, GLB/glTF, OBJ, FBX o DAE sobre la ventana para importarlos."},
-    {TextId::AboutProjectCredit, "Pixelizer de Jon Tamayo"},
+    {TextId::AboutProjectCredit, "Pixatto de Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. Publicado bajo la licencia MIT."},
     {TextId::AboutThirdPartyTitle, "Licencias y créditos de terceros"},
     {TextId::AboutDependenciesTitle, "Dependencias"},
@@ -455,10 +455,10 @@ constexpr Translation kSpanish[] = {
 constexpr Translation kFrench[] = {
     {TextId::LanguageWindowTitle, "Langue"},
     {TextId::ChooseLanguage, "Choisir une langue"},
-    {TextId::AboutWindowTitle, "À propos de Pixelizer"},
+    {TextId::AboutWindowTitle, "À propos de Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "À propos de Pixelizer"},
-    {TextId::AboutProjectCredit, "Pixelizer par Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "À propos de Pixatto"},
+    {TextId::AboutProjectCredit, "Pixatto par Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. Publié sous licence MIT."},
     {TextId::AboutThirdPartyTitle, "Licences et crédits tiers"},
     {TextId::AboutDependenciesTitle, "Dépendances"},
@@ -599,10 +599,10 @@ constexpr Translation kFrench[] = {
 constexpr Translation kGerman[] = {
     {TextId::LanguageWindowTitle, "Sprache"},
     {TextId::ChooseLanguage, "Sprache auswählen"},
-    {TextId::AboutWindowTitle, "Über Pixelizer"},
+    {TextId::AboutWindowTitle, "Über Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "Über Pixelizer"},
-    {TextId::AboutProjectCredit, "Pixelizer von Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "Über Pixatto"},
+    {TextId::AboutProjectCredit, "Pixatto von Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. Veröffentlicht unter der MIT-Lizenz."},
     {TextId::AboutThirdPartyTitle, "Lizenzen und Danksagungen Dritter"},
     {TextId::AboutDependenciesTitle, "Abhängigkeiten"},
@@ -743,10 +743,10 @@ constexpr Translation kGerman[] = {
 constexpr Translation kDanish[] = {
     {TextId::LanguageWindowTitle, "Sprog"},
     {TextId::ChooseLanguage, "Vælg et sprog"},
-    {TextId::AboutWindowTitle, "Om Pixelizer"},
+    {TextId::AboutWindowTitle, "Om Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "Om Pixelizer"},
-    {TextId::AboutProjectCredit, "Pixelizer af Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "Om Pixatto"},
+    {TextId::AboutProjectCredit, "Pixatto af Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. Udgivet under MIT-licensen."},
     {TextId::AboutThirdPartyTitle, "Tredjepartslicenser og krediteringer"},
     {TextId::AboutDependenciesTitle, "Afhængigheder"},
@@ -848,10 +848,10 @@ constexpr Translation kDanish[] = {
 constexpr Translation kSwedish[] = {
     {TextId::LanguageWindowTitle, "Språk"},
     {TextId::ChooseLanguage, "Välj ett språk"},
-    {TextId::AboutWindowTitle, "Om Pixelizer"},
+    {TextId::AboutWindowTitle, "Om Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "Om Pixelizer"},
-    {TextId::AboutProjectCredit, "Pixelizer av Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "Om Pixatto"},
+    {TextId::AboutProjectCredit, "Pixatto av Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. Släppt under MIT-licensen."},
     {TextId::AboutThirdPartyTitle, "Tredjepartslicenser och erkännanden"},
     {TextId::AboutDependenciesTitle, "Beroenden"},
@@ -951,10 +951,10 @@ constexpr Translation kSwedish[] = {
 constexpr Translation kNorwegian[] = {
     {TextId::LanguageWindowTitle, "Språk"},
     {TextId::ChooseLanguage, "Velg språk"},
-    {TextId::AboutWindowTitle, "Om Pixelizer"},
+    {TextId::AboutWindowTitle, "Om Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "Om Pixelizer"},
-    {TextId::AboutProjectCredit, "Pixelizer av Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "Om Pixatto"},
+    {TextId::AboutProjectCredit, "Pixatto av Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. Utgitt under MIT-lisensen."},
     {TextId::AboutThirdPartyTitle, "Tredjepartslisenser og krediteringer"},
     {TextId::AboutDependenciesTitle, "Avhengigheter"},
@@ -1054,10 +1054,10 @@ constexpr Translation kNorwegian[] = {
 constexpr Translation kCzech[] = {
     {TextId::LanguageWindowTitle, "Jazyk"},
     {TextId::ChooseLanguage, "Vyberte jazyk"},
-    {TextId::AboutWindowTitle, "O Pixelizeru"},
+    {TextId::AboutWindowTitle, "O Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "O Pixelizeru"},
-    {TextId::AboutProjectCredit, "Pixelizer od Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "O Pixatto"},
+    {TextId::AboutProjectCredit, "Pixatto od Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. Vydáno pod licencí MIT."},
     {TextId::AboutThirdPartyTitle, "Licence a kredity třetích stran"},
     {TextId::AboutDependenciesTitle, "Závislosti"},
@@ -1157,10 +1157,10 @@ constexpr Translation kCzech[] = {
 constexpr Translation kItalian[] = {
     {TextId::LanguageWindowTitle, "Lingua"},
     {TextId::ChooseLanguage, "Scegli una lingua"},
-    {TextId::AboutWindowTitle, "Informazioni su Pixelizer"},
+    {TextId::AboutWindowTitle, "Informazioni su Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "Informazioni su Pixelizer"},
-    {TextId::AboutProjectCredit, "Pixelizer di Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "Informazioni su Pixatto"},
+    {TextId::AboutProjectCredit, "Pixatto di Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. Rilasciato con licenza MIT."},
     {TextId::AboutThirdPartyTitle, "Licenze e crediti di terze parti"},
     {TextId::AboutDependenciesTitle, "Dipendenze"},
@@ -1260,10 +1260,10 @@ constexpr Translation kItalian[] = {
 constexpr Translation kGreek[] = {
     {TextId::LanguageWindowTitle, "Γλώσσα"},
     {TextId::ChooseLanguage, "Επιλέξτε γλώσσα"},
-    {TextId::AboutWindowTitle, "Σχετικά με το Pixelizer"},
+    {TextId::AboutWindowTitle, "Σχετικά με το Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "Σχετικά με το Pixelizer"},
-    {TextId::AboutProjectCredit, "Pixelizer από τον Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "Σχετικά με το Pixatto"},
+    {TextId::AboutProjectCredit, "Pixatto από τον Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. Κυκλοφορεί με άδεια MIT."},
     {TextId::AboutThirdPartyTitle, "Άδειες και αναφορές τρίτων"},
     {TextId::AboutDependenciesTitle, "Εξαρτήσεις"},
@@ -1351,10 +1351,10 @@ constexpr Translation kGreek[] = {
 constexpr Translation kPolish[] = {
     {TextId::LanguageWindowTitle, "Język"},
     {TextId::ChooseLanguage, "Wybierz język"},
-    {TextId::AboutWindowTitle, "O Pixelizerze"},
+    {TextId::AboutWindowTitle, "O Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "O Pixelizerze"},
-    {TextId::AboutProjectCredit, "Pixelizer autorstwa Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "O Pixatto"},
+    {TextId::AboutProjectCredit, "Pixatto autorstwa Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. Wydany na licencji MIT."},
     {TextId::AboutThirdPartyTitle, "Licencje i podziękowania stron trzecich"},
     {TextId::AboutDependenciesTitle, "Zależności"},
@@ -1448,10 +1448,10 @@ constexpr Translation kPolish[] = {
 constexpr Translation kFinnish[] = {
     {TextId::LanguageWindowTitle, "Kieli"},
     {TextId::ChooseLanguage, "Valitse kieli"},
-    {TextId::AboutWindowTitle, "Tietoja Pixelizeristä"},
+    {TextId::AboutWindowTitle, "Tietoja Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "Tietoja Pixelizeristä"},
-    {TextId::AboutProjectCredit, "Pixelizer, tekijä Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "Tietoja Pixatto"},
+    {TextId::AboutProjectCredit, "Pixatto, tekijä Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. Julkaistu MIT-lisenssillä."},
     {TextId::AboutThirdPartyTitle, "Kolmansien osapuolten lisenssit ja krediitit"},
     {TextId::AboutDependenciesTitle, "Riippuvuudet"},
@@ -1545,10 +1545,10 @@ constexpr Translation kFinnish[] = {
 constexpr Translation kUkrainian[] = {
     {TextId::LanguageWindowTitle, "Мова"},
     {TextId::ChooseLanguage, "Виберіть мову"},
-    {TextId::AboutWindowTitle, "Про Pixelizer"},
+    {TextId::AboutWindowTitle, "Про Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "Про Pixelizer"},
-    {TextId::AboutProjectCredit, "Pixelizer від Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "Про Pixatto"},
+    {TextId::AboutProjectCredit, "Pixatto від Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. Випущено за ліцензією MIT."},
     {TextId::AboutThirdPartyTitle, "Ліцензії та подяки третім сторонам"},
     {TextId::AboutDependenciesTitle, "Залежності"},
@@ -1636,10 +1636,10 @@ constexpr Translation kUkrainian[] = {
 constexpr Translation kRussian[] = {
     {TextId::LanguageWindowTitle, "Язык"},
     {TextId::ChooseLanguage, "Выберите язык"},
-    {TextId::AboutWindowTitle, "О Pixelizer"},
+    {TextId::AboutWindowTitle, "О Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "О Pixelizer"},
-    {TextId::AboutProjectCredit, "Pixelizer от Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "О Pixatto"},
+    {TextId::AboutProjectCredit, "Pixatto от Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. Выпущено по лицензии MIT."},
     {TextId::AboutThirdPartyTitle, "Лицензии и благодарности третьим сторонам"},
     {TextId::AboutDependenciesTitle, "Зависимости"},
@@ -1727,10 +1727,10 @@ constexpr Translation kRussian[] = {
 constexpr Translation kChineseSimplified[] = {
     {TextId::LanguageWindowTitle, "语言"},
     {TextId::ChooseLanguage, "选择语言"},
-    {TextId::AboutWindowTitle, "关于 Pixelizer"},
+    {TextId::AboutWindowTitle, "关于 Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "关于 Pixelizer"},
-    {TextId::AboutProjectCredit, "Pixelizer 作者：Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "关于 Pixatto"},
+    {TextId::AboutProjectCredit, "Pixatto 作者：Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo。根据 MIT 许可证发布。"},
     {TextId::AboutThirdPartyTitle, "第三方许可和鸣谢"},
     {TextId::AboutDependenciesTitle, "依赖项"},
@@ -1846,10 +1846,10 @@ constexpr Translation kChineseSimplified[] = {
 constexpr Translation kChineseTraditional[] = {
     {TextId::LanguageWindowTitle, "語言"},
     {TextId::ChooseLanguage, "選擇語言"},
-    {TextId::AboutWindowTitle, "關於 Pixelizer"},
+    {TextId::AboutWindowTitle, "關於 Pixatto"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "關於 Pixelizer"},
-    {TextId::AboutProjectCredit, "Pixelizer 作者：Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "關於 Pixatto"},
+    {TextId::AboutProjectCredit, "Pixatto 作者：Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo。依 MIT 授權條款發布。"},
     {TextId::AboutThirdPartyTitle, "第三方授權與致謝"},
     {TextId::AboutDependenciesTitle, "相依項目"},
@@ -1943,10 +1943,10 @@ constexpr Translation kChineseTraditional[] = {
 constexpr Translation kKorean[] = {
     {TextId::LanguageWindowTitle, "언어"},
     {TextId::ChooseLanguage, "언어 선택"},
-    {TextId::AboutWindowTitle, "Pixelizer 정보"},
+    {TextId::AboutWindowTitle, "Pixatto 정보"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "Pixelizer 정보"},
-    {TextId::AboutProjectCredit, "Pixelizer 제작: Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "Pixatto 정보"},
+    {TextId::AboutProjectCredit, "Pixatto 제작: Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. MIT 라이선스로 배포됩니다."},
     {TextId::AboutThirdPartyTitle, "타사 라이선스 및 크레딧"},
     {TextId::AboutDependenciesTitle, "의존성"},
@@ -2034,10 +2034,10 @@ constexpr Translation kKorean[] = {
 constexpr Translation kJapanese[] = {
     {TextId::LanguageWindowTitle, "言語"},
     {TextId::ChooseLanguage, "言語を選択"},
-    {TextId::AboutWindowTitle, "Pixelizer について"},
+    {TextId::AboutWindowTitle, "Pixatto について"},
     {TextId::AboutButtonLabel, "🛈"},
-    {TextId::AboutButtonTooltip, "Pixelizer について"},
-    {TextId::AboutProjectCredit, "Pixelizer 制作: Jon Tamayo"},
+    {TextId::AboutButtonTooltip, "Pixatto について"},
+    {TextId::AboutProjectCredit, "Pixatto 制作: Jon Tamayo"},
     {TextId::AboutProjectLicense, "Copyright (c) 2026 Jon Tamayo. MIT License の下で公開されています。"},
     {TextId::AboutThirdPartyTitle, "サードパーティのライセンスとクレジット"},
     {TextId::AboutDependenciesTitle, "依存関係"},
@@ -2495,4 +2495,4 @@ std::string format_translation(
     return formatted;
 }
 
-} // namespace pixelizer
+} // namespace pixatto

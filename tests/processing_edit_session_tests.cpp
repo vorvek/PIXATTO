@@ -1,4 +1,4 @@
-#include "pixelizer/processing_edit_session.hpp"
+#include "pixatto/processing_edit_session.hpp"
 
 #include <cmath>
 #include <stdexcept>
@@ -19,7 +19,7 @@ void require(bool condition)
 
 void continuous_edit_commits_one_undo_step()
 {
-    pixelizer::ProcessingEditSession session;
+    pixatto::ProcessingEditSession session;
 
     auto drag = session.begin_edit();
     drag.settings().pixel_size = 12;
@@ -39,7 +39,7 @@ void continuous_edit_commits_one_undo_step()
 
 void repeated_live_edits_keep_preview_dirty()
 {
-    pixelizer::ProcessingEditSession session;
+    pixatto::ProcessingEditSession session;
 
     auto first = session.begin_edit();
     first.settings().pixel_size = 12;
@@ -60,7 +60,7 @@ void repeated_live_edits_keep_preview_dirty()
 
 void atomic_edit_normalizes_levels()
 {
-    pixelizer::ProcessingEditSession session;
+    pixatto::ProcessingEditSession session;
 
     auto edit = session.begin_edit();
     edit.settings().adjustments.input_white = 0.4F;
@@ -74,7 +74,7 @@ void atomic_edit_normalizes_levels()
 
 void bayer_sixteen_survives_normalization()
 {
-    pixelizer::ProcessingEditSession session;
+    pixatto::ProcessingEditSession session;
 
     auto edit = session.begin_edit();
     edit.settings().bayer_matrix_size = 16;
@@ -85,21 +85,21 @@ void bayer_sixteen_survives_normalization()
 
 void history_preserves_full_palette_colors()
 {
-    pixelizer::ProcessingEditSession session;
+    pixatto::ProcessingEditSession session;
 
     auto first = session.begin_edit();
     first.settings().use_palette = true;
-    first.settings().palette = {pixelizer::Color32{255, 0, 0, 255}};
+    first.settings().palette = {pixatto::Color32{255, 0, 0, 255}};
     first.selected_palette() = 0;
     first.commit();
 
     auto second = session.begin_edit();
-    second.settings().palette = {pixelizer::Color32{0, 0, 255, 255}};
+    second.settings().palette = {pixatto::Color32{0, 0, 255, 255}};
     second.commit();
 
     require(session.undo(1));
     require(session.settings().palette.size() == 1U);
-    const pixelizer::Color32 expected = {255, 0, 0, 255};
+    const pixatto::Color32 expected = {255, 0, 0, 255};
     require(session.settings().palette[0] == expected);
     require(session.selected_palette() == 0);
 }

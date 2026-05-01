@@ -1,5 +1,5 @@
-#include "pixelizer/image.hpp"
-#include "pixelizer/model.hpp"
+#include "pixatto/image.hpp"
+#include "pixatto/model.hpp"
 
 #include <cstdint>
 #include <cstring>
@@ -21,7 +21,7 @@ void require(bool condition)
 
 std::filesystem::path test_dir()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "pixelizer-model-tests";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "pixatto-model-tests";
     std::error_code ec;
     std::filesystem::remove_all(path, ec);
     std::filesystem::create_directories(path);
@@ -85,7 +85,7 @@ std::vector<unsigned char> triangle_buffer()
 
 void write_texture_png(const std::filesystem::path& path)
 {
-    const pixelizer::Image image = {
+    const pixatto::Image image = {
         2,
         1,
         {
@@ -94,7 +94,7 @@ void write_texture_png(const std::filesystem::path& path)
         },
     };
     std::string error;
-    require(pixelizer::save_png_rgba(path.string(), image, error));
+    require(pixatto::save_png_rgba(path.string(), image, error));
 }
 
 std::string gltf_json(const std::string& image_uri, bool two_primitives)
@@ -134,25 +134,25 @@ void gltf_external_texture_loads_and_dedupes()
     write_binary(dir / "mesh.bin", triangle_buffer());
     write_text(dir / "model.gltf", gltf_json("diffuse.png", true));
 
-    const pixelizer::ModelLoadResult loaded = pixelizer::load_model_document(dir / "model.gltf");
+    const pixatto::ModelLoadResult loaded = pixatto::load_model_document(dir / "model.gltf");
     require(loaded.error.empty());
     require(loaded.model.textures.size() == 1U);
     require(loaded.model.primitives.size() == 2U);
     require(loaded.model.primitives[0].texture_index == 0);
     require(loaded.model.primitives[1].texture_index == 0);
-    require(pixelizer::default_model_texture_export_name(loaded.model.textures[0], 0) == "diffuse.png");
+    require(pixatto::default_model_texture_export_name(loaded.model.textures[0], 0) == "diffuse.png");
 }
 
 void fbx_extension_is_supported()
 {
-    require(pixelizer::is_model_path("models/hero.fbx"));
-    require(pixelizer::is_model_path("models/HERO.FBX"));
+    require(pixatto::is_model_path("models/hero.fbx"));
+    require(pixatto::is_model_path("models/HERO.FBX"));
 }
 
 void dae_extension_is_supported()
 {
-    require(pixelizer::is_model_path("models/hero.dae"));
-    require(pixelizer::is_model_path("models/HERO.DAE"));
+    require(pixatto::is_model_path("models/hero.dae"));
+    require(pixatto::is_model_path("models/HERO.DAE"));
 }
 
 void fbx_ascii_triangle_loads_with_fallback_material()
@@ -230,7 +230,7 @@ Connections:  {
 }
 )");
 
-    const pixelizer::ModelLoadResult loaded = pixelizer::load_model_document(dir / "triangle.fbx");
+    const pixatto::ModelLoadResult loaded = pixatto::load_model_document(dir / "triangle.fbx");
     require(loaded.error.empty());
     require(loaded.model.used_fallback_texture);
     require(loaded.model.textures.empty());
@@ -339,13 +339,13 @@ Connections:  {
 }
 )");
 
-    const pixelizer::ModelLoadResult loaded = pixelizer::load_model_document(dir / "textured.fbx");
+    const pixatto::ModelLoadResult loaded = pixatto::load_model_document(dir / "textured.fbx");
     require(loaded.error.empty());
     require(!loaded.model.used_fallback_texture);
     require(loaded.model.textures.size() == 1U);
     require(loaded.model.primitives.size() == 1U);
     require(loaded.model.primitives[0].texture_index == 0);
-    require(pixelizer::default_model_texture_export_name(loaded.model.textures[0], 0) == "diffuse.png");
+    require(pixatto::default_model_texture_export_name(loaded.model.textures[0], 0) == "diffuse.png");
 }
 
 void dae_external_diffuse_texture_loads()
@@ -448,7 +448,7 @@ void dae_external_diffuse_texture_loads()
 </COLLADA>
 )");
 
-    const pixelizer::ModelLoadResult loaded = pixelizer::load_model_document(dir / "model.dae");
+    const pixatto::ModelLoadResult loaded = pixatto::load_model_document(dir / "model.dae");
     require(loaded.error.empty());
     require(!loaded.model.used_fallback_texture);
     require(loaded.model.textures.size() == 1U);
@@ -460,7 +460,7 @@ void dae_external_diffuse_texture_loads()
     require(loaded.model.primitives[0].mesh_name == "Tri");
     require(loaded.model.primitives[0].material_name == "mat");
     require(loaded.model.primitives[0].vertices[0].x == 1.0F);
-    require(pixelizer::default_model_texture_export_name(loaded.model.textures[0], 0) == "diffuse.png");
+    require(pixatto::default_model_texture_export_name(loaded.model.textures[0], 0) == "diffuse.png");
 }
 
 void gltf_without_material_uses_grey_fallback()
@@ -486,7 +486,7 @@ void gltf_without_material_uses_grey_fallback()
   "scene": 0
 })");
 
-    const pixelizer::ModelLoadResult loaded = pixelizer::load_model_document(dir / "hero.gltf");
+    const pixatto::ModelLoadResult loaded = pixatto::load_model_document(dir / "hero.gltf");
     require(loaded.error.empty());
     require(loaded.model.used_fallback_texture);
     require(loaded.model.textures.empty());
@@ -545,11 +545,11 @@ void glb_embedded_texture_loads()
     glb.insert(glb.end(), bin.begin(), bin.end());
     write_binary(dir / "model.glb", glb);
 
-    const pixelizer::ModelLoadResult loaded = pixelizer::load_model_document(dir / "model.glb");
+    const pixatto::ModelLoadResult loaded = pixatto::load_model_document(dir / "model.glb");
     require(loaded.error.empty());
     require(loaded.model.textures.size() == 1U);
     require(loaded.model.textures[0].embedded);
-    require(pixelizer::default_model_texture_export_name(loaded.model.textures[0], 0) == "texture_0.png");
+    require(pixatto::default_model_texture_export_name(loaded.model.textures[0], 0) == "texture_0.png");
 }
 
 void obj_diffuse_texture_loads()
@@ -569,7 +569,7 @@ void obj_diffuse_texture_loads()
         "usemtl mat\n"
         "f 1/1 2/2 3/3\n");
 
-    const pixelizer::ModelLoadResult loaded = pixelizer::load_model_document(dir / "model.obj");
+    const pixatto::ModelLoadResult loaded = pixatto::load_model_document(dir / "model.obj");
     require(loaded.error.empty());
     require(loaded.model.textures.size() == 1U);
     require(loaded.model.primitives.size() == 1U);
@@ -588,7 +588,7 @@ void model_without_texture_uses_fallback()
         "v 0 1 0\n"
         "f 1 2 3\n");
 
-    const pixelizer::ModelLoadResult loaded = pixelizer::load_model_document(dir / "plain.obj");
+    const pixatto::ModelLoadResult loaded = pixatto::load_model_document(dir / "plain.obj");
     require(loaded.error.empty());
     require(loaded.model.textures.empty());
     require(loaded.model.used_fallback_texture);
@@ -598,12 +598,12 @@ void model_without_texture_uses_fallback()
 
 void export_name_defaults()
 {
-    pixelizer::ModelTexture external;
+    pixatto::ModelTexture external;
     external.source_path = "C:/assets/painted-diffuse.jpg";
-    require(pixelizer::default_model_texture_export_name(external, 4) == "painted-diffuse.png");
+    require(pixatto::default_model_texture_export_name(external, 4) == "painted-diffuse.png");
 
-    pixelizer::ModelTexture embedded;
-    require(pixelizer::default_model_texture_export_name(embedded, 4) == "texture_4.png");
+    pixatto::ModelTexture embedded;
+    require(pixatto::default_model_texture_export_name(embedded, 4) == "texture_4.png");
 }
 
 } // namespace

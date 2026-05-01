@@ -1,11 +1,11 @@
 #pragma once
 
-#include "pixelizer/image.hpp"
+#include "pixatto/image.hpp"
 
 #include <cstdint>
 #include <vector>
 
-namespace pixelizer {
+namespace pixatto {
 
 enum class DitherMode {
     None,
@@ -75,4 +75,4 @@ struct ProcessSettings {
 
 Image process_image(const Image& source, const ProcessSettings& settings);
 
-} // namespace pixelizer
+} // namespace pixatto

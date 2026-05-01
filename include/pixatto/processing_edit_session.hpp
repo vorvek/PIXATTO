@@ -1,12 +1,12 @@
 #pragma once
 
-#include "pixelizer/image_processing.hpp"
+#include "pixatto/image_processing.hpp"
 
 #include <cstddef>
 #include <optional>
 #include <vector>
 
-namespace pixelizer {
+namespace pixatto {
 
 class ProcessingEditSession {
 public:
@@ -68,4 +68,4 @@ private:
     std::vector<Snapshot> redo_stack_;
 };
 
-} // namespace pixelizer
+} // namespace pixatto

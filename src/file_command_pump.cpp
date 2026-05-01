@@ -1,6 +1,6 @@
-#include "pixelizer/file_command_pump.hpp"
+#include "pixatto/file_command_pump.hpp"
 
-#include "pixelizer/image_formats.hpp"
+#include "pixatto/image_formats.hpp"
 
 #include <SDL3/SDL_dialog.h>
 #include <SDL3/SDL_error.h>
@@ -11,7 +11,7 @@
 #include <mutex>
 #include <utility>
 
-namespace pixelizer {
+namespace pixatto {
 namespace {
 
 bool has_extension(const std::filesystem::path& path, const char* extension)
@@ -345,4 +345,4 @@ bool FileCommandPump::request_dialog(
     return true;
 }
 
-} // namespace pixelizer
+} // namespace pixatto

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "pixelizer/image_processing.hpp"
+#include "pixatto/image_processing.hpp"
 
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
 
-namespace pixelizer {
+namespace pixatto {
 
 struct Preset {
     std::string name;
@@ -36,4 +36,4 @@ bool save_preset_to_dir(
     Preset& saved,
     std::string& error);
 
-} // namespace pixelizer
+} // namespace pixatto

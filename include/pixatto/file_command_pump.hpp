@@ -7,7 +7,7 @@
 
 struct SDL_Window;
 
-namespace pixelizer {
+namespace pixatto {
 
 namespace detail {
 struct FileCommandPumpDialogState;
@@ -86,4 +86,4 @@ private:
     std::vector<FileCommand> queued_commands_;
 };
 
-} // namespace pixelizer
+} // namespace pixatto

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "pixelizer/image.hpp"
+#include "pixatto/image.hpp"
 
 #include <array>
 #include <filesystem>
 #include <string>
 #include <vector>
 
-namespace pixelizer {
+namespace pixatto {
 
 struct ModelVertex {
     float x = 0.0F;
@@ -57,4 +57,4 @@ struct ModelLoadResult {
 [[nodiscard]] ModelLoadResult load_model_document(const std::filesystem::path& path);
 [[nodiscard]] std::string default_model_texture_export_name(const ModelTexture& texture, std::size_t index);
 
-} // namespace pixelizer
+} // namespace pixatto

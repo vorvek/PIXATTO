@@ -7,7 +7,7 @@
 #include <string>
 #include <string_view>
 
-namespace pixelizer {
+namespace pixatto {
 
 inline constexpr std::array<std::string_view, 17> kImportableImageExtensions = {
     ".png",
@@ -48,4 +48,4 @@ inline bool is_importable_image_path(const std::filesystem::path& path)
         != kImportableImageExtensions.end();
 }
 
-} // namespace pixelizer
+} // namespace pixatto

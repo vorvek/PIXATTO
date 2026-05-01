@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Pixelizer VERSION 1.7.0 LANGUAGES C CXX)
+project(Pixatto VERSION 1.7.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,10 +11,10 @@ find_package(OpenGL REQUIRED)
 
 if(WIN32)
     enable_language(RC)
-    set(PIXELIZER_WINDOWS_ICON "${PROJECT_SOURCE_DIR}/assets/icon/pixelizer.ico")
+    set(PIXATTO_WINDOWS_ICON "${PROJECT_SOURCE_DIR}/assets/icon/pixatto.ico")
     configure_file(
-        src/platform/windows/pixelizer.rc.in
-        "${PROJECT_BINARY_DIR}/pixelizer.rc"
+        src/platform/windows/pixatto.rc.in
+        "${PROJECT_BINARY_DIR}/pixatto.rc"
         @ONLY
     )
 endif()
@@ -46,28 +46,28 @@ include(CheckCCompilerFlag)
 include(CheckCXXCompilerFlag)
 include(CheckLinkerFlag)
 
-function(pixelizer_enable_release_sections target)
+function(pixatto_enable_release_sections target)
     if(MSVC)
         return()
     endif()
 
-    check_c_compiler_flag("-ffunction-sections" PIXELIZER_HAS_C_FUNCTION_SECTIONS)
-    check_cxx_compiler_flag("-ffunction-sections" PIXELIZER_HAS_CXX_FUNCTION_SECTIONS)
-    if(PIXELIZER_HAS_C_FUNCTION_SECTIONS AND PIXELIZER_HAS_CXX_FUNCTION_SECTIONS)
+    check_c_compiler_flag("-ffunction-sections" PIXATTO_HAS_C_FUNCTION_SECTIONS)
+    check_cxx_compiler_flag("-ffunction-sections" PIXATTO_HAS_CXX_FUNCTION_SECTIONS)
+    if(PIXATTO_HAS_C_FUNCTION_SECTIONS AND PIXATTO_HAS_CXX_FUNCTION_SECTIONS)
         target_compile_options(${target} PRIVATE
             $<$<CONFIG:Release>:-ffunction-sections -fdata-sections>
         )
     endif()
 endfunction()
 
-function(pixelizer_enable_release_dead_code_collection target)
+function(pixatto_enable_release_dead_code_collection target)
     if(MSVC)
         return()
     endif()
 
-    pixelizer_enable_release_sections(${target})
-    check_linker_flag(CXX "-Wl,--gc-sections" PIXELIZER_HAS_GC_SECTIONS)
-    if(PIXELIZER_HAS_GC_SECTIONS)
+    pixatto_enable_release_sections(${target})
+    check_linker_flag(CXX "-Wl,--gc-sections" PIXATTO_HAS_GC_SECTIONS)
+    if(PIXATTO_HAS_GC_SECTIONS)
         target_link_options(${target} PRIVATE
             $<$<CONFIG:Release>:-Wl,--gc-sections>
         )
@@ -193,14 +193,14 @@ if(POLICY CMP0169)
 endif()
 
 if(TARGET SDL3::SDL3-static)
-    set(PIXELIZER_SDL_TARGET SDL3::SDL3-static)
+    set(PIXATTO_SDL_TARGET SDL3::SDL3-static)
 elseif(TARGET SDL3::SDL3)
-    set(PIXELIZER_SDL_TARGET SDL3::SDL3)
+    set(PIXATTO_SDL_TARGET SDL3::SDL3)
 else()
     message(FATAL_ERROR "SDL3 was fetched, but no usable SDL3 CMake target was found.")
 endif()
 
-message(STATUS "Pixelizer SDL target: ${PIXELIZER_SDL_TARGET}")
+message(STATUS "Pixatto SDL target: ${PIXATTO_SDL_TARGET}")
 
 add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp
@@ -217,11 +217,11 @@ target_include_directories(imgui
         ${imgui_SOURCE_DIR}/backends
 )
 
-target_link_libraries(imgui PUBLIC ${PIXELIZER_SDL_TARGET})
+target_link_libraries(imgui PUBLIC ${PIXATTO_SDL_TARGET})
 
 target_compile_definitions(imgui PUBLIC IMGUI_USE_WCHAR32)
 
-pixelizer_enable_release_sections(imgui)
+pixatto_enable_release_sections(imgui)
 
 add_library(ufbx STATIC
     ${ufbx_SOURCE_DIR}/ufbx.c
@@ -233,7 +233,7 @@ target_include_directories(ufbx
     PUBLIC
         ${ufbx_SOURCE_DIR}
 )
-pixelizer_enable_release_sections(ufbx)
+pixatto_enable_release_sections(ufbx)
 
 add_library(tinyxml2 STATIC
     ${tinyxml2_SOURCE_DIR}/tinyxml2.cpp
@@ -243,9 +243,9 @@ target_include_directories(tinyxml2
     PUBLIC
         ${tinyxml2_SOURCE_DIR}
 )
-pixelizer_enable_release_sections(tinyxml2)
+pixatto_enable_release_sections(tinyxml2)
 
-set(PIXELIZER_APP_SOURCES
+set(PIXATTO_APP_SOURCES
     src/app.cpp
     src/file_command_pump.cpp
     src/image_io.cpp
@@ -263,19 +263,19 @@ foreach(optional_source IN ITEMS
     src/image_processing.cpp
 )
     if(EXISTS "${PROJECT_SOURCE_DIR}/${optional_source}")
-        list(APPEND PIXELIZER_APP_SOURCES ${optional_source})
+        list(APPEND PIXATTO_APP_SOURCES ${optional_source})
     endif()
 endforeach()
 
 if(WIN32)
-    list(APPEND PIXELIZER_APP_SOURCES "${PROJECT_BINARY_DIR}/pixelizer.rc")
+    list(APPEND PIXATTO_APP_SOURCES "${PROJECT_BINARY_DIR}/pixatto.rc")
 endif()
 
-add_executable(pixelizer WIN32
-    ${PIXELIZER_APP_SOURCES}
+add_executable(pixatto WIN32
+    ${PIXATTO_APP_SOURCES}
 )
 
-target_include_directories(pixelizer
+target_include_directories(pixatto
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${stb_SOURCE_DIR}
@@ -283,9 +283,9 @@ target_include_directories(pixelizer
         ${tinyobjloader_SOURCE_DIR}
 )
 
-target_link_libraries(pixelizer
+target_link_libraries(pixatto
     PRIVATE
-        ${PIXELIZER_SDL_TARGET}
+        ${PIXATTO_SDL_TARGET}
         SDL3_image::SDL3_image
         imgui
         OpenGL::GL
@@ -294,106 +294,106 @@ target_link_libraries(pixelizer
 )
 
 if(TARGET SDL3-static)
-    pixelizer_enable_release_sections(SDL3-static)
+    pixatto_enable_release_sections(SDL3-static)
 endif()
 
-pixelizer_enable_release_dead_code_collection(pixelizer)
+pixatto_enable_release_dead_code_collection(pixatto)
 
-add_custom_command(TARGET pixelizer POST_BUILD
+add_custom_command(TARGET pixatto POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E rm -rf
-        "$<TARGET_FILE_DIR:pixelizer>/assets"
+        "$<TARGET_FILE_DIR:pixatto>/assets"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${PROJECT_SOURCE_DIR}/assets"
-        "$<TARGET_FILE_DIR:pixelizer>/assets"
+        "$<TARGET_FILE_DIR:pixatto>/assets"
 )
 
 if(MINGW)
-    target_link_options(pixelizer PRIVATE -static -static-libgcc -static-libstdc++)
+    target_link_options(pixatto PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
 
 if(MSVC)
-    target_compile_options(pixelizer PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(pixatto PRIVATE /W4 /permissive- /utf-8)
 else()
-    target_compile_options(pixelizer PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(pixatto PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 enable_testing()
 
-add_executable(pixelizer_processing_edit_session_tests
+add_executable(pixatto_processing_edit_session_tests
     tests/processing_edit_session_tests.cpp
     src/processing_edit_session.cpp
 )
 
-target_include_directories(pixelizer_processing_edit_session_tests
+target_include_directories(pixatto_processing_edit_session_tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
 )
 
 if(MSVC)
-    target_compile_options(pixelizer_processing_edit_session_tests PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(pixatto_processing_edit_session_tests PRIVATE /W4 /permissive- /utf-8)
 else()
-    target_compile_options(pixelizer_processing_edit_session_tests PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(pixatto_processing_edit_session_tests PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-add_test(NAME processing_edit_session COMMAND pixelizer_processing_edit_session_tests)
+add_test(NAME processing_edit_session COMMAND pixatto_processing_edit_session_tests)
 
-add_executable(pixelizer_file_command_pump_tests
+add_executable(pixatto_file_command_pump_tests
     tests/file_command_pump_tests.cpp
     src/file_command_pump.cpp
 )
 
-target_include_directories(pixelizer_file_command_pump_tests
+target_include_directories(pixatto_file_command_pump_tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
 )
 
-target_link_libraries(pixelizer_file_command_pump_tests
+target_link_libraries(pixatto_file_command_pump_tests
     PRIVATE
-        ${PIXELIZER_SDL_TARGET}
+        ${PIXATTO_SDL_TARGET}
 )
 
 if(MSVC)
-    target_compile_options(pixelizer_file_command_pump_tests PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(pixatto_file_command_pump_tests PRIVATE /W4 /permissive- /utf-8)
 else()
-    target_compile_options(pixelizer_file_command_pump_tests PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(pixatto_file_command_pump_tests PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-add_test(NAME file_command_pump COMMAND pixelizer_file_command_pump_tests)
+add_test(NAME file_command_pump COMMAND pixatto_file_command_pump_tests)
 
-add_executable(pixelizer_image_io_tests
+add_executable(pixatto_image_io_tests
     tests/image_io_tests.cpp
     src/image_io.cpp
     src/vendor/stb_impl.cpp
 )
 
-target_include_directories(pixelizer_image_io_tests
+target_include_directories(pixatto_image_io_tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${stb_SOURCE_DIR}
 )
 
-target_link_libraries(pixelizer_image_io_tests
+target_link_libraries(pixatto_image_io_tests
     PRIVATE
-        ${PIXELIZER_SDL_TARGET}
+        ${PIXATTO_SDL_TARGET}
         SDL3_image::SDL3_image
 )
 
 if(MSVC)
-    target_compile_options(pixelizer_image_io_tests PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(pixatto_image_io_tests PRIVATE /W4 /permissive- /utf-8)
 else()
-    target_compile_options(pixelizer_image_io_tests PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(pixatto_image_io_tests PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-add_test(NAME image_io COMMAND pixelizer_image_io_tests)
+add_test(NAME image_io COMMAND pixatto_image_io_tests)
 
-add_executable(pixelizer_model_tests
+add_executable(pixatto_model_tests
     tests/model_tests.cpp
     src/image_io.cpp
     src/model.cpp
     src/vendor/stb_impl.cpp
 )
 
-target_include_directories(pixelizer_model_tests
+target_include_directories(pixatto_model_tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${stb_SOURCE_DIR}
@@ -403,77 +403,77 @@ target_include_directories(pixelizer_model_tests
         ${tinyxml2_SOURCE_DIR}
 )
 
-target_link_libraries(pixelizer_model_tests
+target_link_libraries(pixatto_model_tests
     PRIVATE
-        ${PIXELIZER_SDL_TARGET}
+        ${PIXATTO_SDL_TARGET}
         SDL3_image::SDL3_image
         ufbx
         tinyxml2
 )
 
 if(MSVC)
-    target_compile_options(pixelizer_model_tests PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(pixatto_model_tests PRIVATE /W4 /permissive- /utf-8)
 else()
-    target_compile_options(pixelizer_model_tests PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(pixatto_model_tests PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-add_test(NAME model COMMAND pixelizer_model_tests)
+add_test(NAME model COMMAND pixatto_model_tests)
 
-add_executable(pixelizer_localization_tests
+add_executable(pixatto_localization_tests
     tests/localization_tests.cpp
     src/localization.cpp
 )
 
-target_include_directories(pixelizer_localization_tests
+target_include_directories(pixatto_localization_tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
 )
 
 if(MSVC)
-    target_compile_options(pixelizer_localization_tests PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(pixatto_localization_tests PRIVATE /W4 /permissive- /utf-8)
 else()
-    target_compile_options(pixelizer_localization_tests PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(pixatto_localization_tests PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-add_test(NAME localization COMMAND pixelizer_localization_tests)
+add_test(NAME localization COMMAND pixatto_localization_tests)
 
-add_executable(pixelizer_preset_tests
+add_executable(pixatto_preset_tests
     tests/preset_tests.cpp
     src/preset.cpp
 )
 
-target_include_directories(pixelizer_preset_tests
+target_include_directories(pixatto_preset_tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
 )
 
-target_link_libraries(pixelizer_preset_tests
+target_link_libraries(pixatto_preset_tests
     PRIVATE
-        ${PIXELIZER_SDL_TARGET}
+        ${PIXATTO_SDL_TARGET}
 )
 
 if(MSVC)
-    target_compile_options(pixelizer_preset_tests PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(pixatto_preset_tests PRIVATE /W4 /permissive- /utf-8)
 else()
-    target_compile_options(pixelizer_preset_tests PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(pixatto_preset_tests PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-add_test(NAME presets COMMAND pixelizer_preset_tests)
+add_test(NAME presets COMMAND pixatto_preset_tests)
 
-add_executable(pixelizer_image_processing_tests
+add_executable(pixatto_image_processing_tests
     tests/image_processing_tests.cpp
     src/image_processing.cpp
 )
 
-target_include_directories(pixelizer_image_processing_tests
+target_include_directories(pixatto_image_processing_tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
 )
 
 if(MSVC)
-    target_compile_options(pixelizer_image_processing_tests PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(pixatto_image_processing_tests PRIVATE /W4 /permissive- /utf-8)
 else()
-    target_compile_options(pixelizer_image_processing_tests PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(pixatto_image_processing_tests PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-add_test(NAME image_processing COMMAND pixelizer_image_processing_tests)
+add_test(NAME image_processing COMMAND pixatto_image_processing_tests)

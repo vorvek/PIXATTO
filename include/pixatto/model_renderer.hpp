@@ -1,13 +1,13 @@
 #pragma once
 
-#include "pixelizer/image.hpp"
-#include "pixelizer/model.hpp"
+#include "pixatto/image.hpp"
+#include "pixatto/model.hpp"
 
 #include <cstdint>
 #include <string>
 #include <vector>
 
-namespace pixelizer {
+namespace pixatto {
 
 class ModelRenderer {
 public:
@@ -42,4 +42,4 @@ private:
     Impl* impl_ = nullptr;
 };
 
-} // namespace pixelizer
+} // namespace pixatto

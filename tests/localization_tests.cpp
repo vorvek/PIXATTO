@@ -1,4 +1,4 @@
-#include "pixelizer/localization.hpp"
+#include "pixatto/localization.hpp"
 
 #include <array>
 #include <stdexcept>
@@ -15,7 +15,7 @@ void require(bool condition)
 
 void translation_catalog_validates()
 {
-    const auto issues = pixelizer::validate_translation_catalog();
+    const auto issues = pixatto::validate_translation_catalog();
     if (!issues.empty()) {
         throw std::runtime_error(issues.front().message);
     }
@@ -23,24 +23,24 @@ void translation_catalog_validates()
 
 void english_covers_every_text_id()
 {
-    for (std::size_t index = 0; index < pixelizer::kTextCount; ++index) {
-        const char* translated = pixelizer::translate(pixelizer::Language::English, static_cast<pixelizer::TextId>(index));
+    for (std::size_t index = 0; index < pixatto::kTextCount; ++index) {
+        const char* translated = pixatto::translate(pixatto::Language::English, static_cast<pixatto::TextId>(index));
         require(translated && translated[0] != '\0');
     }
 }
 
 void partial_language_catalogs_fall_back_to_english()
 {
-    const char* english = pixelizer::translate(pixelizer::Language::English, pixelizer::TextId::StatusFileDialogFailedFormat);
-    const char* korean = pixelizer::translate(pixelizer::Language::Korean, pixelizer::TextId::StatusFileDialogFailedFormat);
+    const char* english = pixatto::translate(pixatto::Language::English, pixatto::TextId::StatusFileDialogFailedFormat);
+    const char* korean = pixatto::translate(pixatto::Language::Korean, pixatto::TextId::StatusFileDialogFailedFormat);
     require(std::string(korean) == english);
 }
 
 void format_translation_replaces_placeholders_after_fallback()
 {
-    const std::string formatted = pixelizer::format_translation(
-        pixelizer::Language::Korean,
-        pixelizer::TextId::StatusFileDialogFailedFormat,
+    const std::string formatted = pixatto::format_translation(
+        pixatto::Language::Korean,
+        pixatto::TextId::StatusFileDialogFailedFormat,
         {{"error", "boom"}});
     require(formatted.find("boom") != std::string::npos);
     require(formatted.find("{error}") == std::string::npos);
@@ -49,31 +49,31 @@ void format_translation_replaces_placeholders_after_fallback()
 void preset_management_text_is_localized_for_every_language()
 {
     constexpr std::array preset_text = {
-        pixelizer::TextId::Presets,
-        pixelizer::TextId::NoPresetsSaved,
-        pixelizer::TextId::SavePreset,
-        pixelizer::TextId::DeletePreset,
-        pixelizer::TextId::SavePresetAsTitle,
-        pixelizer::TextId::PresetName,
-        pixelizer::TextId::PresetAlreadyExistsTitle,
-        pixelizer::TextId::PresetAlreadyExistsFormat,
-        pixelizer::TextId::DeletePresetTitle,
-        pixelizer::TextId::DeleteSavedPresetFormat,
-        pixelizer::TextId::StatusPresetSaveFailedFormat,
-        pixelizer::TextId::StatusSavedPresetFormat,
-        pixelizer::TextId::StatusOverwrotePresetFormat,
-        pixelizer::TextId::StatusAppliedPresetFormat,
-        pixelizer::TextId::StatusPresetDeleteFailedFormat,
-        pixelizer::TextId::StatusDeletedPresetFormat,
+        pixatto::TextId::Presets,
+        pixatto::TextId::NoPresetsSaved,
+        pixatto::TextId::SavePreset,
+        pixatto::TextId::DeletePreset,
+        pixatto::TextId::SavePresetAsTitle,
+        pixatto::TextId::PresetName,
+        pixatto::TextId::PresetAlreadyExistsTitle,
+        pixatto::TextId::PresetAlreadyExistsFormat,
+        pixatto::TextId::DeletePresetTitle,
+        pixatto::TextId::DeleteSavedPresetFormat,
+        pixatto::TextId::StatusPresetSaveFailedFormat,
+        pixatto::TextId::StatusSavedPresetFormat,
+        pixatto::TextId::StatusOverwrotePresetFormat,
+        pixatto::TextId::StatusAppliedPresetFormat,
+        pixatto::TextId::StatusPresetDeleteFailedFormat,
+        pixatto::TextId::StatusDeletedPresetFormat,
     };
 
-    for (std::size_t language_index = 0; language_index < pixelizer::kLanguageCount; ++language_index) {
-        const auto language = static_cast<pixelizer::Language>(language_index);
-        for (const pixelizer::TextId id : preset_text) {
-            const std::string translated = pixelizer::translate(language, id);
+    for (std::size_t language_index = 0; language_index < pixatto::kLanguageCount; ++language_index) {
+        const auto language = static_cast<pixatto::Language>(language_index);
+        for (const pixatto::TextId id : preset_text) {
+            const std::string translated = pixatto::translate(language, id);
             require(!translated.empty());
-            if (language != pixelizer::Language::English) {
-                require(translated != pixelizer::translate(pixelizer::Language::English, id));
+            if (language != pixatto::Language::English) {
+                require(translated != pixatto::translate(pixatto::Language::English, id));
             }
         }
     }

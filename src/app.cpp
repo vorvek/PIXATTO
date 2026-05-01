@@ -1,6 +1,6 @@
-#include "pixelizer/app.hpp"
+#include "pixatto/app.hpp"
 
-#include "pixelizer/image_formats.hpp"
+#include "pixatto/image_formats.hpp"
 
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
@@ -30,7 +30,7 @@
 #include <thread>
 #include <utility>
 
-namespace pixelizer {
+namespace pixatto {
 namespace {
 
 constexpr int kInitialWidth = 1440;
@@ -43,7 +43,7 @@ constexpr const char* kGlslVersion =
 #endif
 constexpr float kViewportSplitterThickness = 8.0F;
 constexpr float kViewportMinimumPaneSize = 180.0F;
-constexpr const char* kModelTextureDragPayload = "PIXELIZER_MODEL_TEXTURE_INDEX";
+constexpr const char* kModelTextureDragPayload = "PIXATTO_MODEL_TEXTURE_INDEX";
 constexpr const char* kLospecPaletteCredits[] = {
     "pico-8",
     "dawnbringer-16",
@@ -80,7 +80,7 @@ std::filesystem::path runtime_log_path()
     if (ec || directory.empty()) {
         directory = ".";
     }
-    return directory / "pixelizer_debug.log";
+    return directory / "pixatto_debug.log";
 }
 
 std::string runtime_log_timestamp()
@@ -114,7 +114,7 @@ void reset_runtime_log()
 
     output << runtime_log_timestamp()
            << " [thread " << std::this_thread::get_id() << "] "
-           << "Pixelizer runtime log started. path=" << runtime_log_path().string() << '\n';
+           << "Pixatto runtime log started. path=" << runtime_log_path().string() << '\n';
     output.flush();
 }
 
@@ -842,7 +842,7 @@ bool App::initialize()
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 #endif
 
-    window_ = SDL_CreateWindow("Pixelizer", kInitialWidth, kInitialHeight, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
+    window_ = SDL_CreateWindow("Pixatto", kInitialWidth, kInitialHeight, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
     if (!window_) {
         append_runtime_log(std::string("initialize: SDL_CreateWindow failed: ") + SDL_GetError());
         set_status(textf(TextId::StatusSdlCreateWindowFailedFormat, {{"error", SDL_GetError()}}));
@@ -984,7 +984,7 @@ void App::render_frame()
         | ImGuiWindowFlags_NoSavedSettings
         | ImGuiWindowFlags_NoBringToFrontOnFocus;
     const bool disable_workspace = file_commands_.dialog_open();
-    ImGui::Begin("Pixelizer Workspace", nullptr, flags);
+    ImGui::Begin("Pixatto Workspace", nullptr, flags);
     if (disable_workspace) {
         ImGui::BeginDisabled();
     }
@@ -1307,7 +1307,7 @@ void App::render_about_dialog()
     };
 
     ImGui::BeginChild("##AboutContent", ImVec2(0.0F, content_height), ImGuiChildFlags_None);
-    ImGui::TextUnformatted("Pixelizer");
+    ImGui::TextUnformatted("Pixatto");
     ImGui::Separator();
     ImGui::TextWrapped("%s", text(TextId::AboutProjectCredit));
     ImGui::TextWrapped("%s", text(TextId::AboutProjectLicense));
@@ -4292,4 +4292,4 @@ void App::open_number_edit(std::string label, double value, double minimum, doub
     number_edit_ = std::move(state);
 }
 
-} // namespace pixelizer
+} // namespace pixatto

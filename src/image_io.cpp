@@ -1,4 +1,4 @@
-#include "pixelizer/image.hpp"
+#include "pixatto/image.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -19,7 +19,7 @@
 
 extern "C" unsigned char* stbi_zlib_compress(unsigned char* data, int data_len, int* out_len, int quality);
 
-namespace pixelizer {
+namespace pixatto {
 namespace {
 
 struct SurfaceDeleter {
@@ -657,4 +657,4 @@ bool save_raw_indexed(
     return save_raw_indexed(path, image, preferred_palette, {}, error);
 }
 
-} // namespace pixelizer
+} // namespace pixatto

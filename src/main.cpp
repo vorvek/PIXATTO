@@ -1,11 +1,11 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
-#include "pixelizer/app.hpp"
+#include "pixatto/app.hpp"
 
 int main(int, char**)
 {
-    pixelizer::App app;
+    pixatto::App app;
     if (!app.initialize()) {
         return 1;
     }

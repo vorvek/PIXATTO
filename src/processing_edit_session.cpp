@@ -1,9 +1,9 @@
-#include "pixelizer/processing_edit_session.hpp"
+#include "pixatto/processing_edit_session.hpp"
 
 #include <algorithm>
 #include <utility>
 
-namespace pixelizer {
+namespace pixatto {
 namespace {
 
 constexpr std::size_t kMaxHistoryEntries = 100;
@@ -224,4 +224,4 @@ void ProcessingEditSession::apply_snapshot(const Snapshot& snapshot, std::size_t
     mark_dirty();
 }
 
-} // namespace pixelizer
+} // namespace pixatto

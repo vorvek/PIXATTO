@@ -1,4 +1,4 @@
-#include "pixelizer/model.hpp"
+#include "pixatto/model.hpp"
 
 #define TINYGLTF_IMPLEMENTATION
 #include <tiny_gltf.h>
@@ -26,7 +26,7 @@
 #include <utility>
 #include <vector>
 
-namespace pixelizer {
+namespace pixatto {
 namespace {
 
 struct Mat4 {
@@ -2049,4 +2049,4 @@ std::string default_model_texture_export_name(const ModelTexture& texture, std::
     return "texture_" + std::to_string(index) + ".png";
 }
 
-} // namespace pixelizer
+} // namespace pixatto

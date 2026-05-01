@@ -1,4 +1,4 @@
-#include "pixelizer/model_renderer.hpp"
+#include "pixatto/model_renderer.hpp"
 
 #include <SDL3/SDL_video.h>
 #include <SDL3/SDL_opengl.h>
@@ -17,7 +17,7 @@
 #define APIENTRY
 #endif
 
-namespace pixelizer {
+namespace pixatto {
 namespace {
 
 using GlActiveTexture = void(APIENTRY*)(GLenum);
@@ -680,4 +680,4 @@ std::uintptr_t ModelRenderer::render_preview(
     return static_cast<std::uintptr_t>(impl_->color_texture);
 }
 
-} // namespace pixelizer
+} // namespace pixatto

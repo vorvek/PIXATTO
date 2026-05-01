@@ -1,6 +1,6 @@
 #pragma once
 
-#include "pixelizer/image.hpp"
+#include "pixatto/image.hpp"
 
 #include <cstddef>
 #include <filesystem>
@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace pixelizer {
+namespace pixatto {
 
 inline constexpr std::size_t kMaxPaletteColors = 256;
 
@@ -33,4 +33,4 @@ bool delete_palette_file(const Palette& palette, std::string& error);
 bool overwrite_palette_file(const Palette& palette, const std::vector<Color32>& colors, std::string& error);
 bool save_palette_as_new(const std::string& name, const std::vector<Color32>& colors, Palette& saved, std::string& error);
 
-} // namespace pixelizer
+} // namespace pixatto

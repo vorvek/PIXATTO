@@ -1,4 +1,4 @@
-#include "pixelizer/palette.hpp"
+#include "pixatto/palette.hpp"
 
 #include <SDL3/SDL_filesystem.h>
 
@@ -12,7 +12,7 @@
 #include <string_view>
 #include <vector>
 
-namespace pixelizer {
+namespace pixatto {
 namespace {
 
 constexpr std::string_view kDefaultPaletteSeedMarkerV1 = ".lospec-default-palettes-v1";
@@ -64,16 +64,56 @@ constexpr std::array<LegacyDefaultPaletteFile, 6> kLegacyCgaDefaultPaletteFiles 
     {"cga-palette-2-low.hex", {"000000", "aa0000", "00aaaa", "aaaaaa"}},
 }};
 
-std::filesystem::path palette_dir()
+constexpr const char* kPreferenceOrganization = "Codex";
+constexpr const char* kPreferenceAppName = "Pixatto";
+constexpr const char* kLegacyPreferenceAppName = "Pixelizer";
+
+std::optional<std::filesystem::path> preference_base_dir(const char* app_name)
 {
-    char* pref = SDL_GetPrefPath("Codex", "Pixelizer");
+    char* pref = SDL_GetPrefPath(kPreferenceOrganization, app_name);
     if (!pref) {
-        return std::filesystem::current_path() / "palettes";
+        return std::nullopt;
     }
 
     std::filesystem::path base(pref);
     SDL_free(pref);
-    return base / "palettes";
+    return base;
+}
+
+void copy_legacy_dir_if_needed(const std::filesystem::path& target, const std::filesystem::path& legacy)
+{
+    std::error_code ec;
+    if (std::filesystem::exists(target, ec) || ec) {
+        return;
+    }
+
+    ec.clear();
+    if (!std::filesystem::exists(legacy, ec) || ec) {
+        return;
+    }
+
+    ec.clear();
+    std::filesystem::create_directories(target.parent_path(), ec);
+    if (ec) {
+        return;
+    }
+
+    ec.clear();
+    std::filesystem::copy(legacy, target, std::filesystem::copy_options::recursive | std::filesystem::copy_options::skip_existing, ec);
+}
+
+std::filesystem::path palette_dir()
+{
+    const auto base = preference_base_dir(kPreferenceAppName);
+    if (!base) {
+        return std::filesystem::current_path() / "palettes";
+    }
+
+    const std::filesystem::path dir = *base / "palettes";
+    if (const auto legacy_base = preference_base_dir(kLegacyPreferenceAppName)) {
+        copy_legacy_dir_if_needed(dir, *legacy_base / "palettes");
+    }
+    return dir;
 }
 
 void add_asset_palette_dir_candidates(std::vector<std::filesystem::path>& candidates, std::filesystem::path start)
@@ -673,4 +713,4 @@ std::vector<Palette> load_saved_palettes()
     return palettes;
 }
 
-} // namespace pixelizer
+} // namespace pixatto

@@ -1,4 +1,4 @@
-#include "pixelizer/image_processing.hpp"
+#include "pixatto/image_processing.hpp"
 
 #include <algorithm>
 #include <array>
@@ -9,7 +9,7 @@
 #include <thread>
 #include <vector>
 
-namespace pixelizer {
+namespace pixatto {
 namespace {
 
 constexpr float kEpsilon = 0.000001F;
@@ -1831,4 +1831,4 @@ Image process_image(const Image& source, const ProcessSettings& settings)
     return result;
 }
 
-} // namespace pixelizer
+} // namespace pixatto

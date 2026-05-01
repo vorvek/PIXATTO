@@ -1,4 +1,4 @@
-#include "pixelizer/image.hpp"
+#include "pixatto/image.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -25,7 +25,7 @@ void require(bool condition)
 
 std::filesystem::path test_dir()
 {
-    const std::filesystem::path path = std::filesystem::temp_directory_path() / "pixelizer-image-io-tests";
+    const std::filesystem::path path = std::filesystem::temp_directory_path() / "pixatto-image-io-tests";
     std::error_code ec;
     std::filesystem::remove_all(path, ec);
     std::filesystem::create_directories(path);
@@ -88,7 +88,7 @@ std::optional<PngChunk> find_chunk(const std::vector<unsigned char>& png, const 
 void indexed_png_uses_palette_color_type()
 {
     const std::filesystem::path path = test_dir() / "indexed.png";
-    const pixelizer::Image image = {
+    const pixatto::Image image = {
         2,
         1,
         {
@@ -98,7 +98,7 @@ void indexed_png_uses_palette_color_type()
     };
 
     std::string error;
-    require(pixelizer::save_png_rgba(path.string(), image, error));
+    require(pixatto::save_png_rgba(path.string(), image, error));
 
     const std::vector<unsigned char> png = read_binary(path);
     const std::optional<PngChunk> ihdr = find_chunk(png, "IHDR");
@@ -125,10 +125,10 @@ void png_with_256_opaque_colors_plus_transparency_uses_rgba()
     pixels.push_back(0U);
 
     const std::filesystem::path path = test_dir() / "rgba.png";
-    const pixelizer::Image image = {257, 1, pixels};
+    const pixatto::Image image = {257, 1, pixels};
 
     std::string error;
-    require(pixelizer::save_png_rgba(path.string(), image, error));
+    require(pixatto::save_png_rgba(path.string(), image, error));
 
     const std::vector<unsigned char> png = read_binary(path);
     const std::optional<PngChunk> ihdr = find_chunk(png, "IHDR");
@@ -141,7 +141,7 @@ void png_with_256_opaque_colors_plus_transparency_uses_rgba()
 void indexed_png_with_transparency_round_trips()
 {
     const std::filesystem::path path = test_dir() / "indexed-alpha.png";
-    const pixelizer::Image image = {
+    const pixatto::Image image = {
         2,
         1,
         {
@@ -151,7 +151,7 @@ void indexed_png_with_transparency_round_trips()
     };
 
     std::string error;
-    require(pixelizer::save_png_rgba(path.string(), image, error));
+    require(pixatto::save_png_rgba(path.string(), image, error));
 
     const std::vector<unsigned char> png = read_binary(path);
     const std::optional<PngChunk> ihdr = find_chunk(png, "IHDR");
@@ -160,7 +160,7 @@ void indexed_png_with_transparency_round_trips()
     require(find_chunk(png, "PLTE").has_value());
     require(find_chunk(png, "tRNS").has_value());
 
-    const pixelizer::ImageLoadResult loaded = pixelizer::load_image_rgba(path.string());
+    const pixatto::ImageLoadResult loaded = pixatto::load_image_rgba(path.string());
     require(loaded.error.empty());
     require(loaded.image.width == image.width);
     require(loaded.image.height == image.height);
@@ -179,7 +179,7 @@ void tga_import_simplifies_alpha_to_binary()
             255, 0, 0, 0,
         });
 
-    const pixelizer::ImageLoadResult loaded = pixelizer::load_image_rgba(path.string());
+    const pixatto::ImageLoadResult loaded = pixatto::load_image_rgba(path.string());
     require(loaded.error.empty());
     require(loaded.image.width == 2);
     require(loaded.image.height == 1);
@@ -193,7 +193,7 @@ void raw_export_writes_shared_palette_sidecar_and_image_mask()
 {
     const std::filesystem::path dir = test_dir();
     const std::filesystem::path path = dir / "sprite.raw";
-    const pixelizer::Image image = {
+    const pixatto::Image image = {
         3,
         2,
         {
@@ -205,14 +205,14 @@ void raw_export_writes_shared_palette_sidecar_and_image_mask()
             0, 0, 0, 0,
         },
     };
-    const std::vector<pixelizer::Color32> palette = {
+    const std::vector<pixatto::Color32> palette = {
         {255, 0, 0, 255},
         {0, 255, 0, 255},
         {0, 0, 255, 255},
     };
 
     std::string error;
-    require(pixelizer::save_raw_indexed(path.string(), image, palette, "Game Palette", error));
+    require(pixatto::save_raw_indexed(path.string(), image, palette, "Game Palette", error));
 
     const std::vector<unsigned char> raw = read_binary(path);
     require((raw == std::vector<unsigned char>{0U, 0U, 2U, 0U, 1U, 0U}));

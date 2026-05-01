@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-namespace pixelizer {
+namespace pixatto {
 
 enum class Language {
     English,
@@ -320,4 +320,4 @@ std::string format_translation(
     TextId id,
     std::initializer_list<std::pair<std::string_view, std::string_view>> values);
 
-} // namespace pixelizer
+} // namespace pixatto

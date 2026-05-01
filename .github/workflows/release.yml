@@ -49,16 +49,16 @@ jobs:
         run: cmake --build --preset ninja-release
 
       - name: Strip binary
-        run: strip --strip-unneeded build/ninja-release/pixelizer.exe
+        run: strip --strip-unneeded build/ninja-release/pixatto.exe
 
       - name: Package
         shell: pwsh
         run: |
-          $packageName = "Pixelizer-${env:RELEASE_TAG}-windows-x64"
+          $packageName = "Pixatto-${env:RELEASE_TAG}-windows-x64"
           $packageDir = Join-Path "dist" $packageName
           New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
 
-          Copy-Item "build/ninja-release/pixelizer.exe" $packageDir
+          Copy-Item "build/ninja-release/pixatto.exe" $packageDir
           Copy-Item "README.md" $packageDir
           Copy-Item "CHANGELOG.md" $packageDir
           Copy-Item "THIRD_PARTY.md" $packageDir
@@ -123,14 +123,14 @@ jobs:
 
       - name: Package
         run: |
-          package_name="Pixelizer-${RELEASE_TAG}-linux-x64"
+          package_name="Pixatto-${RELEASE_TAG}-linux-x64"
           package_dir="dist/${package_name}"
           mkdir -p "$package_dir"
 
-          cp build/ninja-release/pixelizer "$package_dir/"
+          cp build/ninja-release/pixatto "$package_dir/"
           cp README.md CHANGELOG.md THIRD_PARTY.md LICENSE "$package_dir/"
           cp -R assets "$package_dir/"
-          strip "$package_dir/pixelizer" || true
+          strip "$package_dir/pixatto" || true
 
           tar -czf "dist/${package_name}.tar.gz" -C dist "$package_name"
           echo "ASSET_PATH=dist/${package_name}.tar.gz" >> "$GITHUB_ENV"
@@ -161,14 +161,14 @@ jobs:
 
       - name: Package
         run: |
-          package_name="Pixelizer-${RELEASE_TAG}-macos"
+          package_name="Pixatto-${RELEASE_TAG}-macos"
           package_dir="dist/${package_name}"
           mkdir -p "$package_dir"
 
-          cp build/ninja-release/pixelizer "$package_dir/"
+          cp build/ninja-release/pixatto "$package_dir/"
           cp README.md CHANGELOG.md THIRD_PARTY.md LICENSE "$package_dir/"
           cp -R assets "$package_dir/"
-          strip "$package_dir/pixelizer" || true
+          strip "$package_dir/pixatto" || true
 
           ditto -c -k --keepParent "$package_dir" "dist/${package_name}.zip"
           echo "ASSET_PATH=dist/${package_name}.zip" >> "$GITHUB_ENV"
@@ -200,9 +200,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          title="Pixelizer ${RELEASE_TAG}"
+          title="Pixatto ${RELEASE_TAG}"
           notes="$(cat <<'NOTES'
-          Automated desktop builds for Pixelizer.
+          Automated desktop builds for Pixatto.
 
           Assets:
           - Windows x64
