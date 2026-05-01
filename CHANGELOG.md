@@ -1,8 +1,15 @@
 # Changelog
 
+## 1.7.0 - 2026-05-01
+
+- Added a batch pixelize workflow that queues multiple images, writes PNG or raw indexed output to a chosen folder, and can run with the current settings or a saved preset.
+- Added saved processing presets, including apply, overwrite, delete, conflict handling, and localized UI text.
+- Switched image import decoding to SDL_image and added TGA, GIF, WebP, JPEG XL, QOI, TIFF, and PNM-family imports with binary imported transparency.
+- Extended drag-and-drop, file picker, and file command handling for the new image import formats.
+- Added regression tests for preset persistence, localized preset labels, file command handling, and SDL_image import behavior.
+
 ## 1.6.1 - 2026-05-01
 
-- Switched image import decoding to SDL_image and added TGA, GIF, WebP, JPEG XL, QOI, TIFF, and PNM-family imports with binary imported transparency.
 - Added FBX model import through ufbx and DAE model import through tinyxml2, keeping the importer on permissive MIT-compatible licensing.
 - Added side-by-side original/result previews in the model texture gallery so imported model textures can be checked before assignment.
 

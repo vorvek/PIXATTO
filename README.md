@@ -10,7 +10,7 @@ Pixelizer is a desktop texture tool for turning images and 3D model textures int
 
 ## What It Does
 
-Pixelizer keeps the editing loop simple: import an asset, tune the pixelization, palette, dithering, and adjustment controls, preview the result live, then export the processed output.
+Pixelizer keeps the editing loop simple: import an asset, tune the pixelization, palette, dithering, and adjustment controls, preview the result live, then export the processed output. Reusable presets and batch image processing are available when the same look needs to be applied again.
 
 It supports standalone images and model texture workflows:
 
@@ -29,6 +29,8 @@ Features include:
 - Palette mapping or per-channel color reduction.
 - Ordered dithering, blue-noise dithering, error diffusion, Riemersma dithering, clustered-dot patterns, and directional patterns.
 - Brightness, contrast, gamma, levels, saturation, and tint controls.
+- Saved processing presets for reusing common looks.
+- Batch pixelizing for multiple images, with PNG or raw indexed output.
 - Undo and redo for processing edits.
 - Independent zoom for original and result previews.
 - Direct numeric entry by double-clicking numeric controls.
