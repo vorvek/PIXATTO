@@ -850,6 +850,7 @@ bool App::initialize()
     SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);
 
     refresh_palettes();
+    refresh_presets();
     append_runtime_log("initialize: complete");
     return true;
 }
@@ -971,6 +972,9 @@ void App::render_frame()
     render_palette_import_name_popup();
     render_palette_color_popup();
     render_save_palette_popup();
+    render_save_preset_popup();
+    render_preset_overwrite_popup();
+    render_delete_preset_popup();
     render_language_picker_popup();
     render_help_dialog();
     render_about_dialog();
@@ -1392,6 +1396,72 @@ void App::render_model_texture_drawer()
     }
 }
 
+void App::render_preset_picker(ProcessSettings& settings, int& selected_palette)
+{
+    ImGui::TextUnformatted(text(TextId::Presets));
+    ImGui::Separator();
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float save_width = ImGui::CalcTextSize(text(TextId::SavePreset)).x + style.FramePadding.x * 2.0F;
+    const float delete_width = ImGui::GetFrameHeight();
+    const float action_width = save_width + delete_width + style.ItemSpacing.x * 2.0F;
+    const float available_width = ImGui::GetContentRegionAvail().x;
+    const float picker_width = std::max(80.0F, available_width - action_width);
+    const int selected_index = effective_selected_preset_index(settings);
+    const char* preview = text(TextId::Presets);
+    if (presets_.empty()) {
+        preview = text(TextId::NoPresetsSaved);
+    } else if (selected_index >= 0 && selected_index < static_cast<int>(presets_.size())) {
+        preview = presets_[static_cast<std::size_t>(selected_index)].name.c_str();
+    }
+
+    if (presets_.empty()) {
+        ImGui::BeginDisabled();
+    }
+    ImGui::SetNextItemWidth(picker_width);
+    if (ImGui::BeginCombo("##PresetPicker", preview, ImGuiComboFlags_HeightLarge)) {
+        for (std::size_t index = 0; index < presets_.size(); ++index) {
+            const Preset& preset = presets_[index];
+            const bool selected = selected_index == static_cast<int>(index);
+            ImGui::PushID(static_cast<int>(index));
+            if (ImGui::Selectable(preset.name.c_str(), selected)) {
+                selected_preset_ = static_cast<int>(index);
+                apply_preset_settings(preset, settings, selected_palette);
+                set_status(textf(TextId::StatusAppliedPresetFormat, {{"name", preset.name}}));
+            }
+            if (selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndCombo();
+    }
+    if (presets_.empty()) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    const bool can_delete = selected_index >= 0 && selected_index < static_cast<int>(presets_.size());
+    if (!can_delete) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("🗑###DeletePreset", ImVec2(delete_width, 0.0F))) {
+        selected_preset_ = selected_index;
+        request_delete_selected_preset();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", text(TextId::DeletePreset));
+    }
+    if (!can_delete) {
+        ImGui::EndDisabled();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(imgui_label(TextId::SavePreset, "SavePreset").c_str(), ImVec2(save_width, 0.0F))) {
+        request_save_preset();
+    }
+    ImGui::Spacing();
+}
+
 void App::render_controls()
 {
     auto edit = edit_session_.begin_edit();
@@ -1403,6 +1473,8 @@ void App::render_controls()
         render_model_texture_drawer();
         ImGui::Spacing();
     }
+
+    render_preset_picker(settings, selected_palette);
 
     ImGui::TextUnformatted(text(TextId::Pixelize));
     ImGui::Separator();
@@ -2314,10 +2386,142 @@ void App::render_save_palette_popup()
     }
 }
 
+void App::render_save_preset_popup()
+{
+    const std::string popup_id = imgui_label(TextId::SavePresetAsTitle, "SavePresetAs");
+
+    if (preset_save_as_ && preset_save_as_->request_open) {
+        ImGui::OpenPopup(popup_id.c_str());
+        preset_save_as_->request_open = false;
+    }
+
+    if (!preset_save_as_) {
+        return;
+    }
+
+    bool popup_open = true;
+    bool reset_popup = false;
+    if (ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted(text(TextId::PresetName));
+        ImGui::SetNextItemWidth(260.0F);
+        const bool submitted = ImGui::InputText(
+            "##PresetName",
+            preset_save_as_->name.data(),
+            preset_save_as_->name.size(),
+            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+
+        const bool save_clicked = ImGui::Button(imgui_label(TextId::Save, "SavePresetAsName").c_str());
+        if (submitted || save_clicked) {
+            if (save_preset_as_name(preset_save_as_->name.data())) {
+                ImGui::CloseCurrentPopup();
+                reset_popup = true;
+            } else if (pending_preset_overwrite_ && pending_preset_overwrite_->request_open) {
+                ImGui::CloseCurrentPopup();
+                reset_popup = true;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(imgui_label(TextId::Cancel, "CancelSavePresetAs").c_str()) || !popup_open) {
+            ImGui::CloseCurrentPopup();
+            reset_popup = true;
+        }
+
+        ImGui::EndPopup();
+    } else if (!ImGui::IsPopupOpen(popup_id.c_str())) {
+        reset_popup = true;
+    }
+
+    if (reset_popup) {
+        preset_save_as_.reset();
+    }
+}
+
+void App::render_preset_overwrite_popup()
+{
+    const std::string popup_id = imgui_label(TextId::PresetAlreadyExistsTitle, "PresetAlreadyExists");
+
+    if (pending_preset_overwrite_ && pending_preset_overwrite_->request_open) {
+        ImGui::OpenPopup(popup_id.c_str());
+        pending_preset_overwrite_->request_open = false;
+    }
+
+    if (!pending_preset_overwrite_) {
+        return;
+    }
+
+    bool popup_open = true;
+    bool reset_popup = false;
+    if (ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        const std::string message = textf(TextId::PresetAlreadyExistsFormat, {{"name", pending_preset_overwrite_->name}});
+        ImGui::TextWrapped("%s", message.c_str());
+
+        if (ImGui::Button(imgui_label(TextId::Overwrite, "OverwritePreset").c_str())) {
+            if (overwrite_pending_preset()) {
+                ImGui::CloseCurrentPopup();
+                reset_popup = true;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(imgui_label(TextId::Cancel, "CancelPresetOverwrite").c_str()) || !popup_open) {
+            ImGui::CloseCurrentPopup();
+            reset_popup = true;
+        }
+
+        ImGui::EndPopup();
+    } else if (!ImGui::IsPopupOpen(popup_id.c_str())) {
+        reset_popup = true;
+    }
+
+    if (reset_popup) {
+        pending_preset_overwrite_.reset();
+    }
+}
+
+void App::render_delete_preset_popup()
+{
+    const std::string popup_id = imgui_label(TextId::DeletePresetTitle, "DeletePresetPopup");
+
+    if (pending_delete_preset_ && pending_delete_preset_->request_open) {
+        ImGui::OpenPopup(popup_id.c_str());
+        pending_delete_preset_->request_open = false;
+    }
+
+    if (!pending_delete_preset_) {
+        return;
+    }
+
+    bool popup_open = true;
+    bool reset_popup = false;
+    if (ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        const std::string message = textf(TextId::DeleteSavedPresetFormat, {{"name", pending_delete_preset_->preset.name}});
+        ImGui::TextWrapped("%s", message.c_str());
+
+        if (ImGui::Button(imgui_label(TextId::Delete, "DeletePresetConfirm").c_str())) {
+            delete_pending_preset();
+            ImGui::CloseCurrentPopup();
+            reset_popup = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(imgui_label(TextId::Cancel, "CancelDeletePreset").c_str()) || !popup_open) {
+            ImGui::CloseCurrentPopup();
+            reset_popup = true;
+        }
+
+        ImGui::EndPopup();
+    } else if (!ImGui::IsPopupOpen(popup_id.c_str())) {
+        reset_popup = true;
+    }
+
+    if (reset_popup) {
+        pending_delete_preset_.reset();
+    }
+}
+
 void App::handle_shortcuts()
 {
     ImGuiIO& io = ImGui::GetIO();
-    if (file_commands_.dialog_open() || number_edit_ || palette_color_edit_ || palette_save_as_ || pending_palette_import_
+    if (file_commands_.dialog_open() || number_edit_ || palette_color_edit_ || palette_save_as_ || preset_save_as_
+        || pending_palette_import_ || pending_preset_overwrite_ || pending_delete_preset_
         || io.WantTextInput || !io.KeyCtrl || !ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
         return;
     }
@@ -2408,6 +2612,9 @@ void App::configure_fonts()
     ImGuiIO& io = ImGui::GetIO();
     ImFontGlyphRangesBuilder builder;
     builder.AddRanges(io.Fonts->GetGlyphRangesDefault());
+    builder.AddRanges(io.Fonts->GetGlyphRangesThai());
+    builder.AddRanges(io.Fonts->GetGlyphRangesVietnamese());
+    builder.AddText("🗑");
 
     for (const LanguageDefinition& definition : language_definitions()) {
         builder.AddText(definition.native_name);
@@ -2441,7 +2648,13 @@ void App::configure_fonts()
     merge_config.PixelSnapH = true;
 
     const std::vector<std::filesystem::path> fallback_candidates = {
+        R"(C:\Windows\Fonts\seguiemj.ttf)",
         R"(C:\Windows\Fonts\seguisym.ttf)",
+        R"(C:\Windows\Fonts\NotoSans-Regular.ttf)",
+        R"(C:\Windows\Fonts\NotoSansThai-Regular.ttf)",
+        R"(C:\Windows\Fonts\NotoSansLao-Regular.ttf)",
+        R"(C:\Windows\Fonts\NotoSansKhmer-Regular.ttf)",
+        R"(C:\Windows\Fonts\NotoSansMyanmar-Regular.ttf)",
         R"(C:\Windows\Fonts\msyh.ttc)",
         R"(C:\Windows\Fonts\msyh.ttf)",
         R"(C:\Windows\Fonts\msjh.ttc)",
@@ -2449,14 +2662,23 @@ void App::configure_fonts()
         R"(C:\Windows\Fonts\YuGothR.ttc)",
         R"(C:\Windows\Fonts\meiryo.ttc)",
         R"(C:\Windows\Fonts\malgun.ttf)",
+        "/System/Library/Fonts/Apple Color Emoji.ttc",
         "/System/Library/Fonts/PingFang.ttc",
         "/System/Library/Fonts/AppleSDGothicNeo.ttc",
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
         "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+        "/System/Library/Fonts/Thonburi.ttc",
+        "/System/Library/Fonts/Kohinoor.ttc",
+        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
         "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansLao-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansKhmer-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansMyanmar-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
         "/usr/share/fonts/truetype/unifont/unifont.ttf",
     };
@@ -3109,6 +3331,109 @@ void App::delete_pending_palette()
     set_status(textf(TextId::StatusDeletedPaletteFormat, {{"name", deleted_name}}));
 }
 
+void App::request_save_preset()
+{
+    edit_session_.cancel_live_edit();
+
+    std::string name = "custom-preset";
+    const int matching = matching_preset_index(edit_session_.settings());
+    if (matching >= 0) {
+        name = presets_[static_cast<std::size_t>(matching)].name;
+    }
+
+    PresetSaveAsState state;
+    state.request_open = true;
+    std::snprintf(state.name.data(), state.name.size(), "%s", name.c_str());
+    preset_save_as_ = state;
+}
+
+bool App::save_preset_as_name(const std::string& name)
+{
+    const std::string normalized_name = normalize_preset_name(name);
+    if (find_preset_conflict(normalized_name)) {
+        pending_preset_overwrite_ = PendingPresetOverwriteState{
+            normalized_name,
+            edit_session_.settings(),
+            true,
+        };
+        return false;
+    }
+
+    Preset saved;
+    std::string error;
+    if (!save_preset_as(normalized_name, edit_session_.settings(), PresetSaveMode::Create, saved, error)) {
+        set_status(textf(TextId::StatusPresetSaveFailedFormat, {{"error", error}}));
+        return false;
+    }
+
+    refresh_presets();
+    select_preset_by_path(saved.path);
+    set_status(textf(TextId::StatusSavedPresetFormat, {{"name", saved.name}}));
+    return true;
+}
+
+bool App::overwrite_pending_preset()
+{
+    if (!pending_preset_overwrite_) {
+        return false;
+    }
+
+    Preset saved;
+    std::string error;
+    if (!save_preset_as(
+            pending_preset_overwrite_->name,
+            pending_preset_overwrite_->settings,
+            PresetSaveMode::Overwrite,
+            saved,
+            error)) {
+        set_status(textf(TextId::StatusPresetSaveFailedFormat, {{"error", error}}));
+        return false;
+    }
+
+    refresh_presets();
+    select_preset_by_path(saved.path);
+    set_status(textf(TextId::StatusOverwrotePresetFormat, {{"name", saved.name}}));
+    return true;
+}
+
+void App::request_delete_selected_preset()
+{
+    const int index = effective_selected_preset_index(edit_session_.settings());
+    if (index < 0 || index >= static_cast<int>(presets_.size())) {
+        return;
+    }
+
+    pending_delete_preset_ = PendingPresetDeleteState{
+        presets_[static_cast<std::size_t>(index)],
+        true,
+    };
+}
+
+void App::delete_pending_preset()
+{
+    if (!pending_delete_preset_) {
+        return;
+    }
+
+    const std::string deleted_name = pending_delete_preset_->preset.name;
+    std::string error;
+    if (!delete_preset_file(pending_delete_preset_->preset, error)) {
+        set_status(textf(TextId::StatusPresetDeleteFailedFormat, {{"error", error}}));
+        return;
+    }
+
+    refresh_presets();
+    selected_preset_ = -1;
+    set_status(textf(TextId::StatusDeletedPresetFormat, {{"name", deleted_name}}));
+}
+
+void App::apply_preset_settings(const Preset& preset, ProcessSettings& settings, int& selected_palette)
+{
+    settings = preset.settings;
+    selected_palette = matching_palette_index(settings);
+    normalize_settings();
+}
+
 void App::export_result_to_png_path(const std::filesystem::path& path)
 {
     if (result_.empty()) {
@@ -3300,6 +3625,59 @@ void App::refresh_palettes()
         edit_session_.selected_palette_for_edit() = -1;
         edit_session_.settings_for_edit().palette.clear();
     }
+}
+
+void App::refresh_presets()
+{
+    presets_ = load_saved_presets();
+    if (selected_preset_ < 0 || selected_preset_ >= static_cast<int>(presets_.size())) {
+        selected_preset_ = -1;
+    }
+}
+
+int App::matching_preset_index(const ProcessSettings& settings) const
+{
+    for (int index = 0; index < static_cast<int>(presets_.size()); ++index) {
+        if (presets_[static_cast<std::size_t>(index)].settings == settings) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+int App::effective_selected_preset_index(const ProcessSettings& settings) const
+{
+    if (selected_preset_ >= 0 && selected_preset_ < static_cast<int>(presets_.size())) {
+        return selected_preset_;
+    }
+    return matching_preset_index(settings);
+}
+
+int App::matching_palette_index(const ProcessSettings& settings) const
+{
+    if (!settings.use_palette || settings.palette.empty()) {
+        return -1;
+    }
+
+    for (int index = 0; index < static_cast<int>(palettes_.size()); ++index) {
+        if (palettes_[static_cast<std::size_t>(index)].colors == settings.palette) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+bool App::select_preset_by_path(const std::filesystem::path& path)
+{
+    for (int index = 0; index < static_cast<int>(presets_.size()); ++index) {
+        if (presets_[static_cast<std::size_t>(index)].path == path) {
+            selected_preset_ = index;
+            return true;
+        }
+    }
+
+    selected_preset_ = -1;
+    return false;
 }
 
 void App::mark_dirty()

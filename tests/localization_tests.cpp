@@ -1,5 +1,6 @@
 #include "pixelizer/localization.hpp"
 
+#include <array>
 #include <stdexcept>
 #include <string>
 
@@ -45,6 +46,39 @@ void format_translation_replaces_placeholders_after_fallback()
     require(formatted.find("{error}") == std::string::npos);
 }
 
+void preset_management_text_is_localized_for_every_language()
+{
+    constexpr std::array preset_text = {
+        pixelizer::TextId::Presets,
+        pixelizer::TextId::NoPresetsSaved,
+        pixelizer::TextId::SavePreset,
+        pixelizer::TextId::DeletePreset,
+        pixelizer::TextId::SavePresetAsTitle,
+        pixelizer::TextId::PresetName,
+        pixelizer::TextId::PresetAlreadyExistsTitle,
+        pixelizer::TextId::PresetAlreadyExistsFormat,
+        pixelizer::TextId::DeletePresetTitle,
+        pixelizer::TextId::DeleteSavedPresetFormat,
+        pixelizer::TextId::StatusPresetSaveFailedFormat,
+        pixelizer::TextId::StatusSavedPresetFormat,
+        pixelizer::TextId::StatusOverwrotePresetFormat,
+        pixelizer::TextId::StatusAppliedPresetFormat,
+        pixelizer::TextId::StatusPresetDeleteFailedFormat,
+        pixelizer::TextId::StatusDeletedPresetFormat,
+    };
+
+    for (std::size_t language_index = 0; language_index < pixelizer::kLanguageCount; ++language_index) {
+        const auto language = static_cast<pixelizer::Language>(language_index);
+        for (const pixelizer::TextId id : preset_text) {
+            const std::string translated = pixelizer::translate(language, id);
+            require(!translated.empty());
+            if (language != pixelizer::Language::English) {
+                require(translated != pixelizer::translate(pixelizer::Language::English, id));
+            }
+        }
+    }
+}
+
 } // namespace
 
 int main()
@@ -53,5 +87,6 @@ int main()
     english_covers_every_text_id();
     partial_language_catalogs_fall_back_to_english();
     format_translation_replaces_placeholders_after_fallback();
+    preset_management_text_is_localized_for_every_language();
     return 0;
 }

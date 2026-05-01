@@ -6,6 +6,7 @@
 #include "pixelizer/model.hpp"
 #include "pixelizer/model_renderer.hpp"
 #include "pixelizer/palette.hpp"
+#include "pixelizer/preset.hpp"
 #include "pixelizer/processing_edit_session.hpp"
 
 #include <SDL3/SDL.h>
@@ -80,6 +81,19 @@ private:
         std::array<char, 128> name{};
         bool request_open = false;
     };
+    struct PresetSaveAsState {
+        std::array<char, 128> name{};
+        bool request_open = false;
+    };
+    struct PendingPresetOverwriteState {
+        std::string name;
+        ProcessSettings settings;
+        bool request_open = false;
+    };
+    struct PendingPresetDeleteState {
+        Preset preset;
+        bool request_open = false;
+    };
     struct PendingPaletteImportState {
         std::filesystem::path source;
         Palette parsed;
@@ -110,6 +124,7 @@ private:
     void render_language_picker_popup();
     void render_help_dialog();
     void render_about_dialog();
+    void render_preset_picker(ProcessSettings& settings, int& selected_palette);
     void render_controls();
     void render_model_materials();
     void render_model_texture_drawer();
@@ -126,6 +141,9 @@ private:
     void render_palette_import_name_popup();
     void render_palette_color_popup();
     void render_save_palette_popup();
+    void render_save_preset_popup();
+    void render_preset_overwrite_popup();
+    void render_delete_preset_popup();
     void handle_shortcuts();
     void update_preview_if_needed();
     void rebuild_texture(Texture& texture, const Image& image, bool nearest);
@@ -159,6 +177,12 @@ private:
     bool save_palette_as_name(const std::string& name);
     bool select_palette_by_path(const std::filesystem::path& path);
     void delete_pending_palette();
+    void request_save_preset();
+    bool save_preset_as_name(const std::string& name);
+    bool overwrite_pending_preset();
+    void request_delete_selected_preset();
+    void delete_pending_preset();
+    void apply_preset_settings(const Preset& preset, ProcessSettings& settings, int& selected_palette);
     void export_result_to_png_path(const std::filesystem::path& path);
     void export_model_texture_to_png_path(std::size_t texture_index, const std::filesystem::path& path);
     void export_result_to_raw_path(const std::filesystem::path& path);
@@ -169,6 +193,11 @@ private:
     [[nodiscard]] std::vector<ModelMaterialSlot> model_material_slots() const;
     [[nodiscard]] std::string model_texture_display_name(std::size_t texture_index) const;
     void refresh_palettes();
+    void refresh_presets();
+    [[nodiscard]] int matching_preset_index(const ProcessSettings& settings) const;
+    [[nodiscard]] int matching_palette_index(const ProcessSettings& settings) const;
+    [[nodiscard]] int effective_selected_preset_index(const ProcessSettings& settings) const;
+    bool select_preset_by_path(const std::filesystem::path& path);
     void mark_dirty();
     void set_status(std::string message);
     [[nodiscard]] bool ensure_gl_context_current();
@@ -207,6 +236,8 @@ private:
 
     ProcessingEditSession edit_session_;
     std::vector<Palette> palettes_;
+    std::vector<Preset> presets_;
+    int selected_preset_ = -1;
 
     float original_zoom_ = 1.0F;
     float result_zoom_ = 1.0F;
@@ -239,6 +270,9 @@ private:
     std::optional<NumberEditState> number_edit_;
     std::optional<PaletteColorEditState> palette_color_edit_;
     std::optional<PaletteSaveAsState> palette_save_as_;
+    std::optional<PresetSaveAsState> preset_save_as_;
+    std::optional<PendingPresetOverwriteState> pending_preset_overwrite_;
+    std::optional<PendingPresetDeleteState> pending_delete_preset_;
 };
 
 } // namespace pixelizer

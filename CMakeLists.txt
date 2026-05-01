@@ -173,6 +173,9 @@ target_include_directories(imgui
 )
 
 target_link_libraries(imgui PUBLIC ${PIXELIZER_SDL_TARGET})
+
+target_compile_definitions(imgui PUBLIC IMGUI_USE_WCHAR32)
+
 pixelizer_enable_release_sections(imgui)
 
 add_library(ufbx STATIC
@@ -206,6 +209,7 @@ set(PIXELIZER_APP_SOURCES
     src/model.cpp
     src/model_renderer.cpp
     src/palette.cpp
+    src/preset.cpp
     src/processing_edit_session.cpp
     src/vendor/stb_impl.cpp
 )
@@ -378,6 +382,29 @@ else()
 endif()
 
 add_test(NAME localization COMMAND pixelizer_localization_tests)
+
+add_executable(pixelizer_preset_tests
+    tests/preset_tests.cpp
+    src/preset.cpp
+)
+
+target_include_directories(pixelizer_preset_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(pixelizer_preset_tests
+    PRIVATE
+        ${PIXELIZER_SDL_TARGET}
+)
+
+if(MSVC)
+    target_compile_options(pixelizer_preset_tests PRIVATE /W4 /permissive- /utf-8)
+else()
+    target_compile_options(pixelizer_preset_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME presets COMMAND pixelizer_preset_tests)
 
 add_executable(pixelizer_image_processing_tests
     tests/image_processing_tests.cpp
