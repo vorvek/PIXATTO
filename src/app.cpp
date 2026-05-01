@@ -1875,7 +1875,7 @@ void App::render_original_view()
         return;
     }
 
-    render_image_view(TextId::Original, "Original", original_texture_, original_zoom_);
+    render_image_view(TextId::Original, "Original", original_texture_, original_zoom_, false);
 }
 
 void App::render_working_view()
@@ -1885,10 +1885,10 @@ void App::render_working_view()
         return;
     }
 
-    render_image_view(TextId::Result, "Result", result_texture_, result_zoom_);
+    render_image_view(TextId::Result, "Result", result_texture_, result_zoom_, true);
 }
 
-void App::render_image_view(TextId label, const char* id, Texture& texture, float& zoom)
+void App::render_image_view(TextId label, const char* id, Texture& texture, float& zoom, bool show_close_file)
 {
     const ImVec2 pane_available = ImGui::GetContentRegionAvail();
 
@@ -1905,6 +1905,9 @@ void App::render_image_view(TextId label, const char* id, Texture& texture, floa
     const std::string fit_id = std::string("Fit") + id;
     if (ImGui::SmallButton(imgui_label(TextId::Fit, fit_id.c_str()).c_str())) {
         zoom = fit_zoom_for_size(texture.width, texture.height, pane_available);
+    }
+    if (show_close_file) {
+        render_close_file_button();
     }
 
     ImGui::Separator();
@@ -1923,6 +1926,29 @@ void App::render_image_view(TextId label, const char* id, Texture& texture, floa
         ImGui::Image(imgui_texture_id(texture.handle), size);
     }
     ImGui::EndChild();
+}
+
+void App::render_close_file_button()
+{
+    if (!has_current_file()) {
+        return;
+    }
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float width = ImGui::CalcTextSize(text(TextId::CloseFile)).x + style.FramePadding.x * 2.0F;
+    const float right_x = ImGui::GetWindowContentRegionMax().x - width;
+    if (right_x > ImGui::GetCursorPosX() + style.ItemSpacing.x) {
+        ImGui::SameLine(right_x);
+    } else {
+        ImGui::SameLine();
+    }
+
+    if (ImGui::SmallButton(imgui_label(TextId::CloseFile, "CloseFile").c_str())) {
+        close_current_file();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", text(TextId::CloseFileTooltip));
+    }
 }
 
 void App::render_model_texture_gallery()
@@ -1984,6 +2010,7 @@ void App::render_model_view()
     if (ImGui::SmallButton(imgui_label(TextId::ResetToOrigin, "ResetModelOrigin").c_str())) {
         reset_model_camera_to_origin();
     }
+    render_close_file_button();
     ImGui::Separator();
 
     ImGui::BeginChild("ModelPreviewScroll", ImVec2(0, 0), ImGuiChildFlags_None);
@@ -3292,6 +3319,42 @@ void App::finish_model_load_from_path(const std::filesystem::path& path, ModelLo
     append_runtime_log("model-load: finish complete");
 }
 
+void App::close_current_file()
+{
+    if (pending_model_load_) {
+        set_status(text(TextId::StatusModelStillLoading));
+        return;
+    }
+    if (!has_current_file()) {
+        return;
+    }
+
+    const bool was_model = document_mode_ == DocumentMode::Model;
+    append_runtime_log(was_model ? "document: closing model file" : "document: closing image file");
+
+    clear_model_document();
+    destroy_texture(original_texture_);
+    destroy_texture(result_texture_);
+    original_ = {};
+    result_ = {};
+    current_image_path_.clear();
+    document_mode_ = DocumentMode::Image;
+    original_zoom_ = 1.0F;
+    result_zoom_ = 1.0F;
+    pending_dropped_image_.reset();
+    open_drop_confirm_ = false;
+    edit_session_.cancel_live_edit();
+    edit_session_.clear_preview_dirty();
+
+    if (was_model) {
+        viewport_mode_ = ViewportMode::Single;
+        viewport_layout_ = ViewportLayout::SideBySide;
+        viewport_split_ratio_ = 0.5F;
+    }
+
+    set_status(text(TextId::StatusClosedFile));
+}
+
 void App::import_model_texture_from_path(const std::filesystem::path& path)
 {
     if (document_mode_ != DocumentMode::Model || model_.empty()) {
@@ -4103,6 +4166,11 @@ int App::matching_palette_index(const ProcessSettings& settings) const
         }
     }
     return -1;
+}
+
+bool App::has_current_file() const noexcept
+{
+    return document_mode_ == DocumentMode::Model ? !model_.empty() : !original_.empty();
 }
 
 bool App::select_preset_by_path(const std::filesystem::path& path)

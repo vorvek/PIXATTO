@@ -150,7 +150,8 @@ private:
     void render_viewports();
     void render_original_view();
     void render_working_view();
-    void render_image_view(TextId label, const char* id, Texture& texture, float& zoom);
+    void render_image_view(TextId label, const char* id, Texture& texture, float& zoom, bool show_close_file);
+    void render_close_file_button();
     void render_model_texture_gallery();
     void render_model_view();
     void render_number_edit_popup();
@@ -186,6 +187,7 @@ private:
     void load_image_from_path(const std::filesystem::path& path);
     void load_model_from_path(const std::filesystem::path& path);
     void finish_model_load_from_path(const std::filesystem::path& path, ModelLoadResult loaded);
+    void close_current_file();
     void import_model_texture_from_path(const std::filesystem::path& path);
     void assign_model_texture_to_slot(const ModelMaterialSlot& slot, std::size_t texture_index);
     void import_palette_from_path(const std::filesystem::path& path);
@@ -224,6 +226,7 @@ private:
     [[nodiscard]] int matching_preset_index(const ProcessSettings& settings) const;
     [[nodiscard]] int matching_palette_index(const ProcessSettings& settings) const;
     [[nodiscard]] int effective_selected_preset_index(const ProcessSettings& settings) const;
+    [[nodiscard]] bool has_current_file() const noexcept;
     bool select_preset_by_path(const std::filesystem::path& path);
     void mark_dirty();
     void set_status(std::string message);
