@@ -97,11 +97,11 @@ Install SDL build dependencies first. On Ubuntu:
 
 ```bash
 sudo apt-get install build-essential cmake git ninja-build pkg-config \
-  libasound2-dev libdbus-1-dev libdecor-0-dev libegl1-mesa-dev \
-  libgl1-mesa-dev libgles2-mesa-dev libibus-1.0-dev libpipewire-0.3-dev \
-  libpulse-dev libudev-dev libwayland-dev libx11-dev libxcursor-dev \
+  libdbus-1-dev libdecor-0-dev libegl1-mesa-dev \
+  libgl1-mesa-dev libgles2-mesa-dev libibus-1.0-dev \
+  libwayland-dev libx11-dev libxcursor-dev \
   libxext-dev libxfixes-dev libxi-dev libxkbcommon-dev libxrandr-dev \
-  libxss-dev libxtst-dev wayland-protocols
+  libxss-dev wayland-protocols
 cmake --preset ninja-release
 cmake --build --preset ninja-release
 ./build/ninja-release/pixatto

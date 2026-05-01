@@ -93,16 +93,12 @@ jobs:
             git \
             ninja-build \
             pkg-config \
-            libasound2-dev \
             libdbus-1-dev \
             libdecor-0-dev \
             libegl1-mesa-dev \
             libgl1-mesa-dev \
             libgles2-mesa-dev \
             libibus-1.0-dev \
-            libpipewire-0.3-dev \
-            libpulse-dev \
-            libudev-dev \
             libwayland-dev \
             libx11-dev \
             libxcursor-dev \
@@ -112,7 +108,6 @@ jobs:
             libxkbcommon-dev \
             libxrandr-dev \
             libxss-dev \
-            libxtst-dev \
             wayland-protocols
 
       - name: Configure
