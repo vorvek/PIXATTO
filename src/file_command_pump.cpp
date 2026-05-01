@@ -1,5 +1,7 @@
 #include "pixelizer/file_command_pump.hpp"
 
+#include "pixelizer/image_formats.hpp"
+
 #include <SDL3/SDL_dialog.h>
 #include <SDL3/SDL_error.h>
 
@@ -133,7 +135,7 @@ bool FileCommandPump::request_open_image_dialog(SDL_Window* window, const FileDi
         window,
         FileCommandKind::OpenImage,
         {labels.images_filter, labels.all_files_filter},
-        {"png;jpg;jpeg;bmp", "*"},
+        {std::string(kImportableImageDialogPattern), "*"},
         false);
 }
 
@@ -206,6 +208,10 @@ void FileCommandPump::submit_drop(std::filesystem::path path, bool has_open_docu
 
     if (is_model_path(path)) {
         queued_commands_.push_back({has_open_document ? FileCommandKind::ConfirmOpenImage : FileCommandKind::OpenModel, std::move(path), {}});
+        return;
+    }
+
+    if (!is_importable_image_path(path)) {
         return;
     }
 

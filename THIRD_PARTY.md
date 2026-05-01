@@ -3,12 +3,21 @@
 Pixelizer fetches these dependencies at configure time and links them into the desktop executable:
 
 - SDL3 `release-3.4.4` from `libsdl-org/SDL`, under the zlib license.
+- SDL_image `release-3.4.2` from `libsdl-org/SDL_image`, under the zlib license.
 - Dear ImGui `v1.92.7` from `ocornut/imgui`, under the MIT license.
 - stb at commit `31c1ad37456438565541f4919958214b6e762fb4` from `nothings/stb`, using its public-domain/MIT dual license.
 - tinygltf `v2.9.7` from `syoyo/tinygltf`, under the MIT license.
 - tinyobjloader `v2.0.0rc13` from `tinyobjloader/tinyobjloader`, under the MIT license.
 - ufbx `v0.21.3` from `ufbx/ufbx`, using its MIT license option.
 - tinyxml2 `11.0.0` from `leethomason/tinyxml2`, under the zlib license.
+
+SDL_image is configured with vendored permissive codec libraries for extended imports:
+
+- libwebp `1.3.2-SDL`, under its BSD-style license.
+- libjxl `v0.7.3-SDL`, under its BSD 3-Clause license.
+- Brotli from the vendored libjxl tree, under the MIT license.
+- Highway from the vendored libjxl tree, under the Apache 2.0 license.
+- libtiff `v4.7.1-SDL`, under its BSD-style license.
 
 Pixelizer bundles these default palette files from Lospec. Links point to the original palette pages:
 

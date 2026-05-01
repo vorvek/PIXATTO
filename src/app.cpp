@@ -1,5 +1,7 @@
 #include "pixelizer/app.hpp"
 
+#include "pixelizer/image_formats.hpp"
+
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl3.h>
@@ -210,21 +212,6 @@ std::string ensure_extension(std::filesystem::path path, const char* expected_ex
         path.replace_extension(expected_extension);
     }
     return path.string();
-}
-
-std::string lower_extension(std::filesystem::path path)
-{
-    std::string extension = path.extension().string();
-    std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    return extension;
-}
-
-bool is_importable_image_path(const std::filesystem::path& path)
-{
-    const std::string extension = lower_extension(path);
-    return extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".bmp";
 }
 
 float fit_zoom_for_size(int width, int height, ImVec2 available)
@@ -1294,6 +1281,7 @@ void App::render_about_dialog()
     ImGui::Separator();
     ImGui::TextUnformatted(text(TextId::AboutDependenciesTitle));
     wrapped_bullet(text(TextId::AboutDependencySdl));
+    wrapped_bullet(text(TextId::AboutDependencySdlImage));
     wrapped_bullet(text(TextId::AboutDependencyImGui));
     wrapped_bullet(text(TextId::AboutDependencyStb));
     wrapped_bullet(text(TextId::AboutDependencyTinyGltf));

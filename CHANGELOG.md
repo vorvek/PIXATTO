@@ -2,6 +2,7 @@
 
 ## 1.6.1 - 2026-05-01
 
+- Switched image import decoding to SDL_image and added TGA, GIF, WebP, JPEG XL, QOI, TIFF, and PNM-family imports with binary imported transparency.
 - Added FBX model import through ufbx and DAE model import through tinyxml2, keeping the importer on permissive MIT-compatible licensing.
 - Added side-by-side original/result previews in the model texture gallery so imported model textures can be checked before assignment.
 

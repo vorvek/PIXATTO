@@ -3,20 +3,33 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <memory>
 #include <string_view>
 #include <unordered_map>
 
-#include <stb_image.h>
+#include <SDL3/SDL.h>
+#include <SDL3_image/SDL_image.h>
+
 #include <stb_image_write.h>
 
 extern "C" unsigned char* stbi_zlib_compress(unsigned char* data, int data_len, int* out_len, int quality);
 
 namespace pixelizer {
 namespace {
+
+struct SurfaceDeleter {
+    void operator()(SDL_Surface* surface) const
+    {
+        SDL_DestroySurface(surface);
+    }
+};
+
+using SurfacePtr = std::unique_ptr<SDL_Surface, SurfaceDeleter>;
 
 struct IndexedImage {
     std::vector<Color32> palette;
@@ -456,58 +469,108 @@ void remove_stale_mask(const std::filesystem::path& path)
     }
 }
 
+std::string sdl_error_or(std::string fallback)
+{
+    if (const char* error = SDL_GetError(); error && *error != '\0') {
+        return error;
+    }
+    return fallback;
+}
+
+ImageLoadResult image_from_surface(SDL_Surface* loaded)
+{
+    ImageLoadResult result;
+    if (!loaded || loaded->w <= 0 || loaded->h <= 0) {
+        result.error = "Unable to load image.";
+        return result;
+    }
+
+    SurfacePtr converted(SDL_ConvertSurface(loaded, SDL_PIXELFORMAT_RGBA32));
+    if (!converted) {
+        result.error = sdl_error_or("Unable to convert image to RGBA.");
+        return result;
+    }
+
+    const auto width = static_cast<std::size_t>(converted->w);
+    const auto height = static_cast<std::size_t>(converted->h);
+    if (width > std::numeric_limits<std::size_t>::max() / height
+        || width * height > std::numeric_limits<std::size_t>::max() / 4U) {
+        result.error = "Image dimensions are too large.";
+        return result;
+    }
+
+    const std::size_t row_bytes = width * 4U;
+    const std::size_t byte_count = row_bytes * height;
+    if (converted->pitch < converted->w * 4) {
+        result.error = "Image buffer does not match its dimensions.";
+        return result;
+    }
+
+    const bool locked = SDL_MUSTLOCK(converted.get());
+    if (locked && !SDL_LockSurface(converted.get())) {
+        result.error = sdl_error_or("Unable to read decoded image pixels.");
+        return result;
+    }
+
+    result.image.width = converted->w;
+    result.image.height = converted->h;
+    result.image.rgba.resize(byte_count);
+
+    const auto* source = static_cast<const std::uint8_t*>(converted->pixels);
+    std::uint8_t* destination = result.image.rgba.data();
+    for (int y = 0; y < converted->h; ++y) {
+        std::memcpy(
+            destination + static_cast<std::size_t>(y) * row_bytes,
+            source + static_cast<std::size_t>(y) * static_cast<std::size_t>(converted->pitch),
+            row_bytes);
+    }
+
+    if (locked) {
+        SDL_UnlockSurface(converted.get());
+    }
+
+    for (std::size_t index = 3U; index < result.image.rgba.size(); index += 4U) {
+        result.image.rgba[index] = result.image.rgba[index] == 0U ? 0U : 255U;
+    }
+
+    return result;
+}
+
 } // namespace
 
 ImageLoadResult load_image_rgba(const std::string& path)
 {
-    ImageLoadResult result;
-
-    int width = 0;
-    int height = 0;
-    int channels = 0;
-    stbi_uc* pixels = stbi_load(path.c_str(), &width, &height, &channels, 4);
-    if (!pixels) {
-        result.error = stbi_failure_reason() ? stbi_failure_reason() : "Unable to load image.";
+    SurfacePtr surface(IMG_Load(path.c_str()));
+    if (!surface) {
+        ImageLoadResult result;
+        result.error = sdl_error_or("Unable to load image.");
         return result;
     }
 
-    const std::size_t byte_count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U;
-    result.image.width = width;
-    result.image.height = height;
-    result.image.rgba.assign(pixels, pixels + byte_count);
-    stbi_image_free(pixels);
-    return result;
+    return image_from_surface(surface.get());
 }
 
 ImageLoadResult load_image_rgba_memory(const std::uint8_t* bytes, std::size_t byte_count)
 {
     ImageLoadResult result;
-    if (!bytes || byte_count == 0U || byte_count > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    if (!bytes || byte_count == 0U) {
         result.error = "Unable to load image.";
         return result;
     }
 
-    int width = 0;
-    int height = 0;
-    int channels = 0;
-    stbi_uc* pixels = stbi_load_from_memory(
-        bytes,
-        static_cast<int>(byte_count),
-        &width,
-        &height,
-        &channels,
-        4);
-    if (!pixels) {
-        result.error = stbi_failure_reason() ? stbi_failure_reason() : "Unable to load image.";
+    SDL_IOStream* stream = SDL_IOFromConstMem(bytes, byte_count);
+    if (!stream) {
+        result.error = sdl_error_or("Unable to read image data.");
         return result;
     }
 
-    const std::size_t pixel_count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-    result.image.width = width;
-    result.image.height = height;
-    result.image.rgba.assign(pixels, pixels + pixel_count * 4U);
-    stbi_image_free(pixels);
-    return result;
+    SurfacePtr surface(IMG_Load_IO(stream, true));
+    if (!surface) {
+        result.error = sdl_error_or("Unable to load image.");
+        return result;
+    }
+
+    return image_from_surface(surface.get());
 }
 
 bool save_png_rgba(const std::string& path, const Image& image, std::string& error)

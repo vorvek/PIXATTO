@@ -70,6 +70,7 @@ constexpr Translation kEnglish[] = {
     {TextId::AboutThirdPartyTitle, "Third-party licenses and credits"},
     {TextId::AboutDependenciesTitle, "Dependencies"},
     {TextId::AboutDependencySdl, "SDL3 release-3.4.4 from libsdl-org/SDL, under the zlib license."},
+    {TextId::AboutDependencySdlImage, "SDL_image release-3.4.2 from libsdl-org/SDL_image, under the zlib license."},
     {TextId::AboutDependencyImGui, "Dear ImGui v1.92.7 from ocornut/imgui, under the MIT license."},
     {TextId::AboutDependencyStb, "stb at commit 31c1ad37456438565541f4919958214b6e762fb4 from nothings/stb, using its public-domain/MIT dual license."},
     {TextId::AboutDependencyTinyGltf, "tinygltf v2.9.7 from syoyo/tinygltf, under the MIT license."},

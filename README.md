@@ -14,13 +14,14 @@ Pixelizer keeps the editing loop simple: import an asset, tune the pixelization,
 
 It supports standalone images and model texture workflows:
 
-- Images: PNG, JPG, JPEG, and BMP.
+- Images: PNG, JPG/JPEG, BMP, TGA, GIF, WebP, JPEG XL, QOI, TIFF, and PNM/PPM/PGM/PBM.
 - 3D models: GLB, glTF, OBJ, FBX, and DAE.
 - Palettes: Lospec `.hex` files, bundled default palettes, and custom palettes made in the app.
 
 ## Image Workflow
 
 Image imports behave like the earlier Pixelizer workflow. The app shows a result viewport by default, with optional two-view layouts for comparing the original and processed image.
+Imports decode to a single flattened image; animated imports are treated as still images for now, and imported alpha is simplified to binary transparency.
 
 Features include:
 
@@ -132,7 +133,7 @@ bool transparent = mask && (mask[i / 8] & (0x80 >> (i & 7)));
 
 ## Dependencies
 
-The build statically links SDL3 `release-3.4.4`, Dear ImGui `v1.92.7`, stb image libraries, tinygltf `v2.9.7`, tinyobjloader `v2.0.0rc13`, ufbx `v0.21.3`, and tinyxml2 `11.0.0`. See [THIRD_PARTY.md](THIRD_PARTY.md) for license notes.
+The build statically links SDL3 `release-3.4.4`, SDL_image `release-3.4.2`, Dear ImGui `v1.92.7`, stb image libraries, tinygltf `v2.9.7`, tinyobjloader `v2.0.0rc13`, ufbx `v0.21.3`, and tinyxml2 `11.0.0`. See [THIRD_PARTY.md](THIRD_PARTY.md) for license notes.
 
 ## License
 

@@ -66,6 +66,7 @@ enum class TextId {
     AboutThirdPartyTitle,
     AboutDependenciesTitle,
     AboutDependencySdl,
+    AboutDependencySdlImage,
     AboutDependencyImGui,
     AboutDependencyStb,
     AboutDependencyTinyGltf,

@@ -95,6 +95,14 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
+    SDL3_image
+    GIT_REPOSITORY https://github.com/libsdl-org/SDL_image.git
+    GIT_TAG release-3.4.2
+    GIT_SHALLOW TRUE
+    GIT_SUBMODULES_RECURSE TRUE
+)
+
+FetchContent_Declare(
     tinygltf
     GIT_REPOSITORY https://github.com/syoyo/tinygltf.git
     GIT_TAG v2.9.7
@@ -122,7 +130,44 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 
-FetchContent_MakeAvailable(SDL3 imgui stb)
+set(SDLIMAGE_INSTALL OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_SAMPLES OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_TESTS OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_VENDORED ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_DEPS_SHARED OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_STRICT ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_ANI OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_AVIF OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_BMP ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_GIF ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_JPG ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_JXL ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_LBM OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_PCX OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_PNG ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_PNG_LIBPNG OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_PNM ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_QOI ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_SVG OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_TGA ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_TIF ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_WEBP ON CACHE BOOL "" FORCE)
+set(SDLIMAGE_XCF OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_XPM OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_XV OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_AVIF_SAVE OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_BMP_SAVE OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_GIF_SAVE OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_JPG_SAVE OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_PNG_SAVE OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_TGA_SAVE OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_WEBP_SAVE OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_DOXYGEN OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(JPEGXL_ENABLE_TOOLS OFF CACHE BOOL "" FORCE)
+set(jbig OFF CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(SDL3 imgui stb SDL3_image)
 if(POLICY CMP0169)
     cmake_policy(PUSH)
     cmake_policy(SET CMP0169 OLD)
@@ -241,6 +286,7 @@ target_include_directories(pixelizer
 target_link_libraries(pixelizer
     PRIVATE
         ${PIXELIZER_SDL_TARGET}
+        SDL3_image::SDL3_image
         imgui
         OpenGL::GL
         ufbx
@@ -326,6 +372,12 @@ target_include_directories(pixelizer_image_io_tests
         ${stb_SOURCE_DIR}
 )
 
+target_link_libraries(pixelizer_image_io_tests
+    PRIVATE
+        ${PIXELIZER_SDL_TARGET}
+        SDL3_image::SDL3_image
+)
+
 if(MSVC)
     target_compile_options(pixelizer_image_io_tests PRIVATE /W4 /permissive- /utf-8)
 else()
@@ -353,6 +405,8 @@ target_include_directories(pixelizer_model_tests
 
 target_link_libraries(pixelizer_model_tests
     PRIVATE
+        ${PIXELIZER_SDL_TARGET}
+        SDL3_image::SDL3_image
         ufbx
         tinyxml2
 )

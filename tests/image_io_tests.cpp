@@ -46,6 +46,14 @@ std::string read_text(const std::filesystem::path& path)
     return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
 
+void write_binary(const std::filesystem::path& path, const std::vector<unsigned char>& bytes)
+{
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    require(static_cast<bool>(output));
+    output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    require(static_cast<bool>(output));
+}
+
 std::uint32_t read_u32_be(const std::vector<unsigned char>& bytes, std::size_t offset)
 {
     return (static_cast<std::uint32_t>(bytes[offset]) << 24U)
@@ -159,6 +167,28 @@ void indexed_png_with_transparency_round_trips()
     require(loaded.image.rgba == image.rgba);
 }
 
+void tga_import_simplifies_alpha_to_binary()
+{
+    const std::filesystem::path path = test_dir() / "alpha.tga";
+    write_binary(
+        path,
+        {
+            0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            2, 0, 1, 0, 32, 8,
+            0, 0, 255, 128,
+            255, 0, 0, 0,
+        });
+
+    const pixelizer::ImageLoadResult loaded = pixelizer::load_image_rgba(path.string());
+    require(loaded.error.empty());
+    require(loaded.image.width == 2);
+    require(loaded.image.height == 1);
+    require((loaded.image.rgba == std::vector<unsigned char>{
+        255, 0, 0, 255,
+        0, 0, 255, 0,
+    }));
+}
+
 void raw_export_writes_shared_palette_sidecar_and_image_mask()
 {
     const std::filesystem::path dir = test_dir();
@@ -201,6 +231,7 @@ int main()
     indexed_png_uses_palette_color_type();
     png_with_256_opaque_colors_plus_transparency_uses_rgba();
     indexed_png_with_transparency_round_trips();
+    tga_import_simplifies_alpha_to_binary();
     raw_export_writes_shared_palette_sidecar_and_image_mask();
     return 0;
 }

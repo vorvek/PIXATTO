@@ -27,12 +27,12 @@ void dropped_image_opens_when_no_image_is_loaded()
 {
     pixelizer::FileCommandPump pump;
 
-    pump.submit_drop("images/example.png", false);
+    pump.submit_drop("images/example.WEBP", false);
     const auto commands = pump.drain_commands();
 
     require(commands.size() == 1U);
     require(commands[0].kind == pixelizer::FileCommandKind::OpenImage);
-    require(commands[0].path == "images/example.png");
+    require(commands[0].path == "images/example.WEBP");
 }
 
 void dropped_image_requires_confirmation_when_image_is_loaded()
@@ -81,6 +81,16 @@ void empty_drop_is_ignored()
     require(commands.empty());
 }
 
+void unsupported_drop_is_ignored()
+{
+    pixelizer::FileCommandPump pump;
+
+    pump.submit_drop("notes/readme.txt", false);
+    const auto commands = pump.drain_commands();
+
+    require(commands.empty());
+}
+
 void drain_clears_queued_commands()
 {
     pixelizer::FileCommandPump pump;
@@ -100,6 +110,7 @@ int main()
     dropped_model_opens_when_no_document_is_loaded();
     dropped_model_requires_confirmation_when_document_is_loaded();
     empty_drop_is_ignored();
+    unsupported_drop_is_ignored();
     drain_clears_queued_commands();
     return 0;
 }
