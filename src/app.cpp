@@ -1472,7 +1472,7 @@ void App::render_preset_picker(ProcessSettings& settings, int& selected_palette)
         ImGui::GetWindowDrawList(),
         ImGui::GetItemRectMin(),
         ImGui::GetItemRectMax(),
-        ImGui::GetColorU32(can_delete ? ImGuiCol_Text : ImGuiCol_TextDisabled));
+        can_delete ? IM_COL32(255, 255, 255, 255) : ImGui::GetColorU32(ImGuiCol_TextDisabled));
     if (delete_pressed) {
         selected_preset_ = selected_index;
         request_delete_selected_preset();
