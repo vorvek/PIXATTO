@@ -20,6 +20,8 @@ enum class FileCommandKind {
     ExportPng,
     ExportModelTexturePng,
     ExportRaw,
+    BatchImages,
+    BatchOutputFolder,
     ConfirmOpenImage,
     DialogFailed,
     DialogCanceled,
@@ -28,6 +30,7 @@ enum class FileCommandKind {
 struct FileCommand {
     FileCommandKind kind = FileCommandKind::OpenImage;
     std::filesystem::path path;
+    std::vector<std::filesystem::path> paths;
     std::string error;
     int index = -1;
 };
@@ -60,6 +63,8 @@ public:
         const std::filesystem::path& default_path,
         int texture_index);
     [[nodiscard]] bool request_export_raw_dialog(SDL_Window* window, const FileDialogLabels& labels);
+    [[nodiscard]] bool request_batch_images_dialog(SDL_Window* window, const FileDialogLabels& labels);
+    [[nodiscard]] bool request_batch_output_folder_dialog(SDL_Window* window, const std::filesystem::path& default_path);
 
     void submit_drop(std::filesystem::path path, bool has_open_document);
     [[nodiscard]] std::vector<FileCommand> drain_commands();
@@ -71,6 +76,8 @@ private:
         std::vector<std::string> filter_names,
         std::vector<std::string> filter_patterns,
         bool save_dialog,
+        bool folder_dialog = false,
+        bool allow_many = false,
         std::filesystem::path default_path = {},
         int index = -1);
 

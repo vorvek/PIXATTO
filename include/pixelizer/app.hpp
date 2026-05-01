@@ -47,6 +47,11 @@ private:
         Model,
     };
 
+    enum class BatchExportFormat {
+        Png,
+        Raw,
+    };
+
     enum class ViewportLayout {
         SideBySide,
         Stacked,
@@ -116,6 +121,20 @@ private:
         std::string mesh_name;
         std::string material_name;
     };
+    struct BatchState {
+        std::vector<std::filesystem::path> images;
+        std::filesystem::path output_dir;
+        std::array<char, 128> suffix{};
+        int selected_preset = -1;
+        BatchExportFormat format = BatchExportFormat::Png;
+        bool request_open = false;
+        bool processing = false;
+        bool cancel_requested = false;
+        std::size_t processed = 0;
+        std::size_t succeeded = 0;
+        std::size_t failed = 0;
+        std::string last_error;
+    };
 
     void shutdown();
     void process_events(bool& running);
@@ -144,7 +163,9 @@ private:
     void render_save_preset_popup();
     void render_preset_overwrite_popup();
     void render_delete_preset_popup();
+    void render_batch_dialog();
     void handle_shortcuts();
+    void update_batch_processing();
     void update_preview_if_needed();
     void rebuild_texture(Texture& texture, const Image& image, bool nearest);
     void configure_fonts();
@@ -154,6 +175,9 @@ private:
     void request_import_palette();
     void request_export_png();
     void request_export_raw();
+    void request_batch();
+    void request_batch_images();
+    void request_batch_output_folder();
     void request_next_model_texture_export();
     void drain_file_commands();
     void handle_file_command(const FileCommand& command);
@@ -186,6 +210,9 @@ private:
     void export_result_to_png_path(const std::filesystem::path& path);
     void export_model_texture_to_png_path(std::size_t texture_index, const std::filesystem::path& path);
     void export_result_to_raw_path(const std::filesystem::path& path);
+    void add_batch_images(const std::vector<std::filesystem::path>& paths);
+    void start_batch_processing();
+    void process_next_batch_image();
     void clear_model_document();
     void reset_model_camera();
     void reset_model_camera_to_origin();
@@ -273,6 +300,7 @@ private:
     std::optional<PresetSaveAsState> preset_save_as_;
     std::optional<PendingPresetOverwriteState> pending_preset_overwrite_;
     std::optional<PendingPresetDeleteState> pending_delete_preset_;
+    std::optional<BatchState> batch_;
 };
 
 } // namespace pixelizer

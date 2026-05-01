@@ -13,6 +13,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cctype>
+#include <cstddef>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -212,6 +213,33 @@ std::string ensure_extension(std::filesystem::path path, const char* expected_ex
         path.replace_extension(expected_extension);
     }
     return path.string();
+}
+
+std::string sanitize_filename_suffix(std::string suffix)
+{
+    for (char& ch : suffix) {
+        const unsigned char uch = static_cast<unsigned char>(ch);
+        if (uch < 32U || ch == '<' || ch == '>' || ch == ':' || ch == '"' || ch == '/' || ch == '\\' || ch == '|'
+            || ch == '?' || ch == '*') {
+            ch = '_';
+        }
+    }
+    return suffix;
+}
+
+std::filesystem::path batch_output_path(
+    const std::filesystem::path& output_dir,
+    const std::filesystem::path& source,
+    std::string suffix,
+    std::string_view extension)
+{
+    std::string stem = source.stem().string();
+    if (stem.empty()) {
+        stem = "image";
+    }
+    stem += sanitize_filename_suffix(std::move(suffix));
+    stem += extension;
+    return output_dir / stem;
 }
 
 float fit_zoom_for_size(int width, int height, ImVec2 available)
@@ -872,6 +900,7 @@ int App::run()
         drain_file_commands();
         update_pending_model_load();
         update_preview_if_needed();
+        update_batch_processing();
         render_frame();
     }
 
@@ -919,7 +948,9 @@ void App::process_events(bool& running)
         if (!file_commands_.dialog_open() && event.type == SDL_EVENT_DROP_FILE && event.drop.data) {
             const std::filesystem::path dropped_path(event.drop.data);
             append_runtime_log(std::string("drop: received ") + quote_path_for_log(dropped_path));
-            if (document_mode_ == DocumentMode::Model && is_importable_image_path(dropped_path)) {
+            if (batch_ && !batch_->processing) {
+                add_batch_images({dropped_path});
+            } else if (document_mode_ == DocumentMode::Model && is_importable_image_path(dropped_path)) {
                 append_runtime_log("drop: importing image into model texture drawer");
                 import_model_texture_from_path(dropped_path);
             } else {
@@ -984,6 +1015,7 @@ void App::render_frame()
     render_save_preset_popup();
     render_preset_overwrite_popup();
     render_delete_preset_popup();
+    render_batch_dialog();
     render_language_picker_popup();
     render_help_dialog();
     render_about_dialog();
@@ -1032,6 +1064,10 @@ void App::render_menu_bar()
             request_export_raw();
         }
         ImGui::EndMenu();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(imgui_label(TextId::BatchButton, "Batch").c_str())) {
+        request_batch();
     }
     ImGui::SameLine();
     const bool single_viewport = viewport_mode_ == ViewportMode::Single;
@@ -2533,11 +2569,194 @@ void App::render_delete_preset_popup()
     }
 }
 
+void App::render_batch_dialog()
+{
+    const std::string popup_id = imgui_label(TextId::BatchWindowTitle, "BatchPixelize");
+
+    if (batch_ && batch_->request_open) {
+        ImGui::OpenPopup(popup_id.c_str());
+        batch_->request_open = false;
+    }
+
+    if (!batch_) {
+        return;
+    }
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const float popup_width = std::min(680.0F, std::max(420.0F, viewport->WorkSize.x - 48.0F));
+    const float popup_height = std::min(560.0F, std::max(380.0F, viewport->WorkSize.y - 48.0F));
+    ImGui::SetNextWindowSize(ImVec2(popup_width, popup_height), ImGuiCond_Appearing);
+
+    bool popup_open = true;
+    bool reset_popup = false;
+    if (ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_NoSavedSettings)) {
+        if (!popup_open) {
+            if (batch_->processing) {
+                batch_->cancel_requested = true;
+                batch_->request_open = true;
+            } else {
+                ImGui::CloseCurrentPopup();
+                reset_popup = true;
+            }
+        }
+
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float footer_height = ImGui::GetFrameHeight() * 2.0F + style.ItemSpacing.y * 3.0F + style.WindowPadding.y;
+        const bool controls_disabled = batch_->processing || file_commands_.dialog_open();
+        if (controls_disabled) {
+            ImGui::BeginDisabled();
+        }
+
+        ImGui::BeginChild("BatchBody", ImVec2(0.0F, -footer_height), ImGuiChildFlags_None);
+        ImGui::TextUnformatted(text(TextId::BatchImages));
+        ImGui::SameLine();
+        if (ImGui::SmallButton(imgui_label(TextId::BatchBrowseImages, "BrowseBatchImages").c_str())) {
+            request_batch_images();
+        }
+
+        ImGui::BeginChild("BatchImageDrawer", ImVec2(0.0F, 160.0F), ImGuiChildFlags_Borders);
+        if (batch_->images.empty()) {
+            const ImVec2 available = ImGui::GetContentRegionAvail();
+            const float hint_width = ImGui::CalcTextSize(text(TextId::BatchImagesDropHint)).x;
+            ImGui::SetCursorPos(ImVec2(
+                std::max(0.0F, (available.x - hint_width) * 0.5F),
+                std::max(0.0F, (available.y - ImGui::GetTextLineHeight()) * 0.5F)));
+            ImGui::TextDisabled("%s", text(TextId::BatchImagesDropHint));
+        } else {
+            for (std::size_t index = 0; index < batch_->images.size(); ++index) {
+                ImGui::PushID(static_cast<int>(index));
+                if (ImGui::SmallButton("x")) {
+                    batch_->images.erase(batch_->images.begin() + static_cast<std::ptrdiff_t>(index));
+                    batch_->processed = 0;
+                    batch_->succeeded = 0;
+                    batch_->failed = 0;
+                    batch_->last_error.clear();
+                    ImGui::PopID();
+                    break;
+                }
+                ImGui::SameLine();
+                ImGui::TextWrapped("%s", batch_->images[index].string().c_str());
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndChild();
+
+        const std::string count = std::to_string(batch_->images.size());
+        ImGui::TextDisabled("%s", textf(TextId::BatchImageCountFormat, {{"count", count}}).c_str());
+
+        ImGui::Spacing();
+        ImGui::TextUnformatted(text(TextId::BatchOutputFolder));
+        ImGui::SameLine();
+        if (ImGui::SmallButton(imgui_label(TextId::BatchChooseFolder, "ChooseBatchOutputFolder").c_str())) {
+            request_batch_output_folder();
+        }
+        if (batch_->output_dir.empty()) {
+            ImGui::TextDisabled("%s", text(TextId::BatchOutputFolder));
+        } else {
+            ImGui::TextWrapped("%s", batch_->output_dir.string().c_str());
+        }
+
+        const char* format_preview = batch_->format == BatchExportFormat::Png ? text(TextId::BatchPng) : text(TextId::BatchRaw);
+        if (ImGui::BeginCombo(imgui_label(TextId::BatchFormat, "BatchFormat").c_str(), format_preview)) {
+            const bool png_selected = batch_->format == BatchExportFormat::Png;
+            if (ImGui::Selectable(text(TextId::BatchPng), png_selected)) {
+                batch_->format = BatchExportFormat::Png;
+            }
+            if (png_selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+            const bool raw_selected = batch_->format == BatchExportFormat::Raw;
+            if (ImGui::Selectable(text(TextId::BatchRaw), raw_selected)) {
+                batch_->format = BatchExportFormat::Raw;
+            }
+            if (raw_selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+
+        ImGui::InputText(
+            imgui_label(TextId::BatchSuffix, "BatchSuffix").c_str(),
+            batch_->suffix.data(),
+            batch_->suffix.size());
+
+        const bool has_saved_preset = batch_->selected_preset >= 0
+            && batch_->selected_preset < static_cast<int>(presets_.size());
+        const char* preset_preview = has_saved_preset
+            ? presets_[static_cast<std::size_t>(batch_->selected_preset)].name.c_str()
+            : text(TextId::BatchCurrentSettings);
+        if (ImGui::BeginCombo(imgui_label(TextId::BatchPreset, "BatchPreset").c_str(), preset_preview)) {
+            const bool current_selected = batch_->selected_preset < 0;
+            if (ImGui::Selectable(text(TextId::BatchCurrentSettings), current_selected)) {
+                batch_->selected_preset = -1;
+            }
+            if (current_selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+            for (std::size_t index = 0; index < presets_.size(); ++index) {
+                const bool selected = batch_->selected_preset == static_cast<int>(index);
+                if (ImGui::Selectable(presets_[index].name.c_str(), selected)) {
+                    batch_->selected_preset = static_cast<int>(index);
+                }
+                if (selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        ImGui::EndChild();
+
+        if (controls_disabled) {
+            ImGui::EndDisabled();
+        }
+
+        const float total = static_cast<float>(batch_->images.size());
+        const float progress = total <= 0.0F ? 0.0F : static_cast<float>(batch_->processed) / total;
+        const std::string progress_label = std::to_string(batch_->processed) + " / " + std::to_string(batch_->images.size());
+        ImGui::ProgressBar(std::clamp(progress, 0.0F, 1.0F), ImVec2(-1.0F, 0.0F), progress_label.c_str());
+
+        const bool can_start = !file_commands_.dialog_open()
+            && !batch_->processing
+            && !batch_->images.empty()
+            && !batch_->output_dir.empty();
+        if (!can_start) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button(imgui_label(TextId::BatchPixelize, "StartBatchPixelize").c_str())) {
+            start_batch_processing();
+        }
+        if (!can_start) {
+            ImGui::EndDisabled();
+        }
+
+        ImGui::SameLine();
+        if (!batch_->processing) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button(imgui_label(TextId::Stop, "StopBatchPixelize").c_str())) {
+            batch_->cancel_requested = true;
+        }
+        if (!batch_->processing) {
+            ImGui::EndDisabled();
+        }
+
+        ImGui::EndPopup();
+    } else if (!ImGui::IsPopupOpen(popup_id.c_str()) && !batch_->processing) {
+        reset_popup = true;
+    }
+
+    if (reset_popup) {
+        batch_.reset();
+    }
+}
+
 void App::handle_shortcuts()
 {
     ImGuiIO& io = ImGui::GetIO();
     if (file_commands_.dialog_open() || number_edit_ || palette_color_edit_ || palette_save_as_ || preset_save_as_
         || pending_palette_import_ || pending_preset_overwrite_ || pending_delete_preset_
+        || batch_
         || io.WantTextInput || !io.KeyCtrl || !ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
         return;
     }
@@ -2770,6 +2989,52 @@ void App::request_export_raw()
     (void)file_commands_.request_export_raw_dialog(window_, file_dialog_labels());
 }
 
+void App::request_batch()
+{
+    BatchState state;
+    state.request_open = true;
+    state.selected_preset = selected_preset_;
+    if (state.selected_preset < 0 || state.selected_preset >= static_cast<int>(presets_.size())) {
+        state.selected_preset = -1;
+    }
+
+    if (last_export_path_) {
+        state.output_dir = last_export_path_->parent_path();
+    }
+    if (state.output_dir.empty() && !current_image_path_.empty()) {
+        state.output_dir = current_image_path_.parent_path();
+    }
+    if (state.output_dir.empty()) {
+        std::error_code ec;
+        state.output_dir = std::filesystem::current_path(ec);
+        if (ec) {
+            state.output_dir.clear();
+        }
+    }
+
+    batch_ = std::move(state);
+}
+
+void App::request_batch_images()
+{
+    if (!batch_ || batch_->processing) {
+        return;
+    }
+    (void)file_commands_.request_batch_images_dialog(window_, file_dialog_labels());
+}
+
+void App::request_batch_output_folder()
+{
+    if (!batch_ || batch_->processing) {
+        return;
+    }
+    std::filesystem::path default_path = batch_->output_dir;
+    if (default_path.empty() && !current_image_path_.empty()) {
+        default_path = current_image_path_.parent_path();
+    }
+    (void)file_commands_.request_batch_output_folder_dialog(window_, default_path);
+}
+
 void App::request_next_model_texture_export()
 {
     if (pending_model_texture_exports_.empty() || file_commands_.dialog_open()) {
@@ -2859,6 +3124,14 @@ void App::handle_file_command(const FileCommand& command)
         break;
     case FileCommandKind::ExportRaw:
         export_result_to_raw_path(command.path);
+        break;
+    case FileCommandKind::BatchImages:
+        add_batch_images(command.paths.empty() ? std::vector<std::filesystem::path>{command.path} : command.paths);
+        break;
+    case FileCommandKind::BatchOutputFolder:
+        if (batch_) {
+            batch_->output_dir = command.path;
+        }
         break;
     case FileCommandKind::ConfirmOpenImage:
         pending_dropped_image_ = command.path;
@@ -3513,6 +3786,155 @@ void App::export_result_to_raw_path(const std::filesystem::path& path)
 
     last_export_path_ = destination;
     set_status(textf(TextId::StatusExportedFormat, {{"name", std::filesystem::path(destination).filename().string()}}));
+}
+
+void App::add_batch_images(const std::vector<std::filesystem::path>& paths)
+{
+    if (!batch_) {
+        request_batch();
+    }
+    if (!batch_ || batch_->processing) {
+        return;
+    }
+
+    std::size_t added = 0;
+    for (const std::filesystem::path& path : paths) {
+        if (!is_importable_image_path(path)) {
+            continue;
+        }
+
+        const auto duplicate = std::find(batch_->images.begin(), batch_->images.end(), path);
+        if (duplicate != batch_->images.end()) {
+            continue;
+        }
+
+        batch_->images.push_back(path);
+        ++added;
+    }
+
+    if (added == 0U) {
+        set_status(text(TextId::StatusBatchNoImagesAdded));
+        return;
+    }
+
+    batch_->processed = 0;
+    batch_->succeeded = 0;
+    batch_->failed = 0;
+    batch_->last_error.clear();
+    set_status(textf(TextId::StatusBatchImagesAddedFormat, {{"count", std::to_string(added)}}));
+}
+
+void App::start_batch_processing()
+{
+    if (!batch_) {
+        return;
+    }
+
+    if (batch_->images.empty()) {
+        set_status(text(TextId::StatusBatchNoImages));
+        return;
+    }
+    if (batch_->output_dir.empty()) {
+        set_status(text(TextId::StatusBatchNoOutputFolder));
+        return;
+    }
+
+    if (batch_->selected_preset < 0 || batch_->selected_preset >= static_cast<int>(presets_.size())) {
+        batch_->selected_preset = -1;
+    }
+
+    batch_->processing = true;
+    batch_->cancel_requested = false;
+    batch_->processed = 0;
+    batch_->succeeded = 0;
+    batch_->failed = 0;
+    batch_->last_error.clear();
+    set_status(textf(TextId::StatusBatchStartedFormat, {{"count", std::to_string(batch_->images.size())}}));
+}
+
+void App::update_batch_processing()
+{
+    if (!batch_ || !batch_->processing) {
+        return;
+    }
+
+    if (batch_->cancel_requested) {
+        batch_->processing = false;
+        set_status(textf(
+            TextId::StatusBatchStoppedFormat,
+            {{"processed", std::to_string(batch_->processed)}, {"total", std::to_string(batch_->images.size())}}));
+        return;
+    }
+
+    if (batch_->processed < batch_->images.size()) {
+        process_next_batch_image();
+    }
+
+    if (batch_ && batch_->processing && batch_->processed >= batch_->images.size()) {
+        batch_->processing = false;
+        set_status(textf(
+            TextId::StatusBatchCompletedFormat,
+            {{"succeeded", std::to_string(batch_->succeeded)}, {"failed", std::to_string(batch_->failed)}}));
+    }
+}
+
+void App::process_next_batch_image()
+{
+    if (!batch_ || batch_->processed >= batch_->images.size()) {
+        return;
+    }
+
+    const std::filesystem::path source = batch_->images[batch_->processed];
+    bool exported = false;
+    std::string error;
+
+    ImageLoadResult loaded = load_image_rgba(source.string());
+    if (!loaded.error.empty()) {
+        error = loaded.error;
+    } else {
+        ProcessSettings settings = edit_session_.settings();
+        std::string palette_name;
+        if (batch_->selected_preset >= 0 && batch_->selected_preset < static_cast<int>(presets_.size())) {
+            const Preset& preset = presets_[static_cast<std::size_t>(batch_->selected_preset)];
+            settings = preset.settings;
+            palette_name = preset.name;
+        } else if (settings.use_palette) {
+            const int selected_palette = edit_session_.selected_palette();
+            if (selected_palette >= 0 && selected_palette < static_cast<int>(palettes_.size())) {
+                const Palette& palette = palettes_[static_cast<std::size_t>(selected_palette)];
+                palette_name = palette.path.empty() ? palette.name : palette.path.stem().string();
+            }
+        }
+
+        const Image processed = process_image(loaded.image, settings);
+        const char* extension = batch_->format == BatchExportFormat::Png ? ".png" : ".raw";
+        const std::filesystem::path destination = batch_output_path(
+            batch_->output_dir,
+            source,
+            batch_->suffix.data(),
+            extension);
+        if (batch_->format == BatchExportFormat::Png) {
+            exported = save_png_rgba(destination.string(), processed, error);
+        } else {
+            const std::vector<Color32> empty_palette;
+            const std::vector<Color32>& preferred_palette = settings.use_palette ? settings.palette : empty_palette;
+            exported = save_raw_indexed(destination.string(), processed, preferred_palette, palette_name, error);
+        }
+
+        if (exported) {
+            last_export_path_ = destination;
+        }
+    }
+
+    if (exported) {
+        ++batch_->succeeded;
+    } else {
+        ++batch_->failed;
+        batch_->last_error = source.filename().string() + ": " + error;
+        set_status(textf(TextId::StatusExportFailedFormat, {{"error", batch_->last_error}}));
+    }
+
+    ++batch_->processed;
 }
 
 void App::clear_model_document()
