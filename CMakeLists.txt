@@ -1,12 +1,13 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Pixelizer VERSION 1.5.0 LANGUAGES C CXX)
+project(Pixelizer VERSION 1.6.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(FetchContent)
+find_package(OpenGL REQUIRED)
 
 if(WIN32)
     enable_language(RC)
@@ -25,6 +26,8 @@ set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
 set(SDL_TESTS OFF CACHE BOOL "" FORCE)
 set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+set(SDL_VIDEO ON CACHE BOOL "" FORCE)
+set(SDL_OPENGL ON CACHE BOOL "" FORCE)
 set(SDL_AUDIO OFF CACHE BOOL "" FORCE)
 set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
 set(SDL_GPU OFF CACHE BOOL "" FORCE)
@@ -91,7 +94,36 @@ FetchContent_Declare(
     GIT_TAG 31c1ad37456438565541f4919958214b6e762fb4
 )
 
+FetchContent_Declare(
+    tinygltf
+    GIT_REPOSITORY https://github.com/syoyo/tinygltf.git
+    GIT_TAG v2.9.7
+    GIT_SHALLOW TRUE
+)
+
+FetchContent_Declare(
+    tinyobjloader
+    GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
+    GIT_TAG v2.0.0rc13
+    GIT_SHALLOW TRUE
+)
+
 FetchContent_MakeAvailable(SDL3 imgui stb)
+if(POLICY CMP0169)
+    cmake_policy(PUSH)
+    cmake_policy(SET CMP0169 OLD)
+endif()
+FetchContent_GetProperties(tinygltf)
+if(NOT tinygltf_POPULATED)
+    FetchContent_Populate(tinygltf)
+endif()
+FetchContent_GetProperties(tinyobjloader)
+if(NOT tinyobjloader_POPULATED)
+    FetchContent_Populate(tinyobjloader)
+endif()
+if(POLICY CMP0169)
+    cmake_policy(POP)
+endif()
 
 if(TARGET SDL3::SDL3-static)
     set(PIXELIZER_SDL_TARGET SDL3::SDL3-static)
@@ -109,7 +141,7 @@ add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/imgui_tables.cpp
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
-    ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
 )
 
 target_include_directories(imgui
@@ -127,6 +159,8 @@ set(PIXELIZER_APP_SOURCES
     src/image_io.cpp
     src/localization.cpp
     src/main.cpp
+    src/model.cpp
+    src/model_renderer.cpp
     src/palette.cpp
     src/processing_edit_session.cpp
     src/vendor/stb_impl.cpp
@@ -152,12 +186,15 @@ target_include_directories(pixelizer
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${stb_SOURCE_DIR}
+        ${tinygltf_SOURCE_DIR}
+        ${tinyobjloader_SOURCE_DIR}
 )
 
 target_link_libraries(pixelizer
     PRIVATE
         ${PIXELIZER_SDL_TARGET}
         imgui
+        OpenGL::GL
 )
 
 if(TARGET SDL3-static)
@@ -246,6 +283,29 @@ else()
 endif()
 
 add_test(NAME image_io COMMAND pixelizer_image_io_tests)
+
+add_executable(pixelizer_model_tests
+    tests/model_tests.cpp
+    src/image_io.cpp
+    src/model.cpp
+    src/vendor/stb_impl.cpp
+)
+
+target_include_directories(pixelizer_model_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${stb_SOURCE_DIR}
+        ${tinygltf_SOURCE_DIR}
+        ${tinyobjloader_SOURCE_DIR}
+)
+
+if(MSVC)
+    target_compile_options(pixelizer_model_tests PRIVATE /W4 /permissive- /utf-8)
+else()
+    target_compile_options(pixelizer_model_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME model COMMAND pixelizer_model_tests)
 
 add_executable(pixelizer_localization_tests
     tests/localization_tests.cpp

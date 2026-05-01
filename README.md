@@ -2,29 +2,75 @@
 
 [![Release](https://github.com/vorvek/Pixelizer/actions/workflows/release.yml/badge.svg)](https://github.com/vorvek/Pixelizer/actions/workflows/release.yml)
 
-Pixelizer is a desktop image tool for turning PNG, JPG, and BMP files into pseudo-pixel art. It runs on Windows, Linux, and macOS, and is written in C++20 with SDL3 and Dear ImGui.
+Pixelizer is a desktop texture tool for turning images and 3D model textures into pseudo-pixel art. It runs on Windows, Linux, and macOS, and is written in C++20 with SDL3, OpenGL, and Dear ImGui.
 
-![Pixelizer showing an original image beside a processed pseudo-pixel-art result](docs/pixelizer-in-action.png)
+| Image workflow | 3D model texture workflow |
+| --- | --- |
+| ![Pixelizer showing an original image beside a processed pseudo-pixel-art result](docs/pixelizer-in-action.png) | ![Pixelizer showing a 3D model preview with materials and a texture drawer](docs/3d_models.png) |
 
-## Features
+## What It Does
 
-- Default single result viewport, with optional side-by-side or stacked original/result viewports
-- Draggable viewport splitter for resizing the preview panes
-- Independent zoom for original and result previews
-- Undo/redo for processing edits with Ctrl+Z and Ctrl+Shift+Z
-- Direct numeric entry by double-clicking numeric controls
-- PNG/JPG/BMP import via `stb_image`
-- Drag-and-drop image import with replace confirmation, plus `.hex` palette drop import
-- PNG export that writes indexed 8-bit PNGs when the result fits in 256 palette entries, and truecolor PNGs otherwise
-- Raw indexed export with shared palette sidecars and optional 1-bit transparency masks
-- Validated Lospec `.hex` palette import with duplicate handling, plus in-app palette creation, color editing, color deletion, save, save-new, and palette deletion
-- Bundled default palettes, including Lospec palettes and greyscale ramps, that are seeded into the palette library on first launch and can still be deleted
-- Palettes are limited to 256 colors, whether imported or created in the app
-- Palette mapping or simpler per-channel color reduction
-- Preliminary single-bit transparency preservation with a special palette entry
-- Block pixelization with linear-light block averaging
-- Optional ordered, blue-noise, error-diffusion, and Riemersma dithering with percentage control and selectable Bayer pattern sizes
-- Brightness, contrast, gamma, levels, saturation, and tint controls
+Pixelizer keeps the editing loop simple: import an asset, tune the pixelization, palette, dithering, and adjustment controls, preview the result live, then export the processed output.
+
+It supports standalone images and model texture workflows:
+
+- Images: PNG, JPG, JPEG, and BMP.
+- 3D models: GLB, glTF, and OBJ.
+- Palettes: Lospec `.hex` files, bundled default palettes, and custom palettes made in the app.
+
+## Image Workflow
+
+Image imports behave like the earlier Pixelizer workflow. The app shows a result viewport by default, with optional two-view layouts for comparing the original and processed image.
+
+Features include:
+
+- Block pixelization with linear-light averaging.
+- Palette mapping or per-channel color reduction.
+- Ordered dithering, blue-noise dithering, error diffusion, Riemersma dithering, clustered-dot patterns, and directional patterns.
+- Brightness, contrast, gamma, levels, saturation, and tint controls.
+- Undo and redo for processing edits.
+- Independent zoom for original and result previews.
+- Direct numeric entry by double-clicking numeric controls.
+
+## 3D Model Texture Workflow
+
+Model imports switch Pixelizer into model mode. GLB, glTF, and OBJ files are loaded into an unshaded OpenGL preview so the processed textures can be checked directly on the mesh.
+
+In model mode:
+
+- The left sidebar shows a material list and a texture drawer.
+- Models with no assigned textures render with a flat grey material.
+- Imported images are added to the texture drawer instead of replacing the model.
+- Textures can be dragged from the drawer onto materials.
+- The same pixelization, palette, adjustment, and dithering controls apply to every assigned diffuse/base-color texture together.
+- The original viewport shows a gallery of source textures.
+- The working viewport shows the processed model preview.
+
+Pixelizer currently processes diffuse/base-color textures only. Normal, metallic, roughness, occlusion, and other data maps are left untouched.
+
+## Controls
+
+The in-app help button next to the language selector lists the active controls. The main shortcuts are:
+
+- `Ctrl+Z`: undo.
+- `Ctrl+Shift+Z`: redo.
+- `Ctrl+mouse wheel` over an image viewport: zoom the image.
+- Left drag over the model preview: orbit.
+- Middle drag, right drag, or `Shift+left drag` over the model preview: pan.
+- Mouse wheel over the model preview: zoom.
+- `Reset view`: fit the camera around the model.
+- `Origin`: center the model preview around world `0,0,0`.
+
+## Exporting
+
+`Export... > Export PNG` adapts to the current workflow:
+
+- In image mode, it exports the processed image.
+- In model mode, it exports the processed model textures only, prompting once per affected texture.
+
+PNG export writes indexed 8-bit PNGs when the result fits in 256 palette entries, and truecolor PNGs otherwise.
+
+`Export... > Export Raw` is available for images. It writes an 8-bit indexed `.raw` file, a shared `.pal` palette sidecar, and an optional `.msk` transparency mask.
 
 ## Downloads
 
@@ -86,7 +132,7 @@ bool transparent = mask && (mask[i / 8] & (0x80 >> (i & 7)));
 
 ## Dependencies
 
-The build statically links SDL3 `release-3.4.4`, Dear ImGui `v1.92.7`, and stb image libraries. See [THIRD_PARTY.md](THIRD_PARTY.md) for license notes.
+The build statically links SDL3 `release-3.4.4`, Dear ImGui `v1.92.7`, stb image libraries, tinygltf `v2.9.7`, and tinyobjloader `v2.0.0rc13`. See [THIRD_PARTY.md](THIRD_PARTY.md) for license notes.
 
 ## License
 

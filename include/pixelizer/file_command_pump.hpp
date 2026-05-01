@@ -15,21 +15,26 @@ struct FileCommandPumpDialogState;
 
 enum class FileCommandKind {
     OpenImage,
+    OpenModel,
     ImportPalette,
     ExportPng,
+    ExportModelTexturePng,
     ExportRaw,
     ConfirmOpenImage,
     DialogFailed,
+    DialogCanceled,
 };
 
 struct FileCommand {
     FileCommandKind kind = FileCommandKind::OpenImage;
     std::filesystem::path path;
     std::string error;
+    int index = -1;
 };
 
 struct FileDialogLabels {
     std::string images_filter;
+    std::string models_filter;
     std::string all_files_filter;
     std::string lospec_palettes_filter;
     std::string png_image_filter;
@@ -46,11 +51,17 @@ public:
 
     [[nodiscard]] bool dialog_open() const noexcept;
     [[nodiscard]] bool request_open_image_dialog(SDL_Window* window, const FileDialogLabels& labels);
+    [[nodiscard]] bool request_open_model_dialog(SDL_Window* window, const FileDialogLabels& labels);
     [[nodiscard]] bool request_import_palette_dialog(SDL_Window* window, const FileDialogLabels& labels);
     [[nodiscard]] bool request_export_png_dialog(SDL_Window* window, const FileDialogLabels& labels);
+    [[nodiscard]] bool request_export_model_texture_png_dialog(
+        SDL_Window* window,
+        const FileDialogLabels& labels,
+        const std::filesystem::path& default_path,
+        int texture_index);
     [[nodiscard]] bool request_export_raw_dialog(SDL_Window* window, const FileDialogLabels& labels);
 
-    void submit_drop(std::filesystem::path path, bool has_open_image);
+    void submit_drop(std::filesystem::path path, bool has_open_document);
     [[nodiscard]] std::vector<FileCommand> drain_commands();
 
 private:
@@ -59,7 +70,9 @@ private:
         FileCommandKind command,
         std::vector<std::string> filter_names,
         std::vector<std::string> filter_patterns,
-        bool save_dialog);
+        bool save_dialog,
+        std::filesystem::path default_path = {},
+        int index = -1);
 
     std::shared_ptr<detail::FileCommandPumpDialogState> dialog_state_;
     bool dialog_open_ = false;

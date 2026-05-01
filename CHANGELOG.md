@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.6.0 - 2026-05-01
+
+- Added GLB/glTF and OBJ model import with an unshaded OpenGL preview.
+- Added model texture processing for glTF base-color textures and OBJ diffuse textures, applying the existing pixel effects to all affected textures at once.
+- Added a stacked model workspace with an original texture gallery, live processed model viewport, material list, and texture drawer for drag/drop assignment.
+- Added grey unshaded fallback rendering for model materials without assigned textures.
+- Added orbit, pan, zoom, reset, and origin controls for the model preview, plus a small viewport gizmo.
+- Added a localized Help dialog with keyboard, mouse, import, and model texture assignment controls.
+- Added sequential PNG export for processed model textures, using the source texture names as defaults.
+- Switched the UI renderer to SDL3 + OpenGL3 so the ImGui workspace and model preview share the same frame.
+- Added asynchronous model loading and a runtime debug log at the system temp path for diagnosing importer or renderer issues.
+- Fixed model-preview framebuffer restore behavior that could leave the UI black after rendering a model.
+
 ## 1.5.0 - 2026-05-01
 
 - Added False Floyd Steinberg, Filter Lite, Zhigang Fan, Shiau-Fan, Stucki, Burkes, Sierra, Two Row Sierra, clustered-dot, horizontal, vertical, and diagonal dithering options.

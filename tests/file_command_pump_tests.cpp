@@ -47,6 +47,30 @@ void dropped_image_requires_confirmation_when_image_is_loaded()
     require(commands[0].path == "images/replacement.png");
 }
 
+void dropped_model_opens_when_no_document_is_loaded()
+{
+    pixelizer::FileCommandPump pump;
+
+    pump.submit_drop("models/hero.glb", false);
+    const auto commands = pump.drain_commands();
+
+    require(commands.size() == 1U);
+    require(commands[0].kind == pixelizer::FileCommandKind::OpenModel);
+    require(commands[0].path == "models/hero.glb");
+}
+
+void dropped_model_requires_confirmation_when_document_is_loaded()
+{
+    pixelizer::FileCommandPump pump;
+
+    pump.submit_drop("models/hero.obj", true);
+    const auto commands = pump.drain_commands();
+
+    require(commands.size() == 1U);
+    require(commands[0].kind == pixelizer::FileCommandKind::ConfirmOpenImage);
+    require(commands[0].path == "models/hero.obj");
+}
+
 void empty_drop_is_ignored()
 {
     pixelizer::FileCommandPump pump;
@@ -73,6 +97,8 @@ int main()
     dropped_palette_imports_immediately();
     dropped_image_opens_when_no_image_is_loaded();
     dropped_image_requires_confirmation_when_image_is_loaded();
+    dropped_model_opens_when_no_document_is_loaded();
+    dropped_model_requires_confirmation_when_document_is_loaded();
     empty_drop_is_ignored();
     drain_clears_queued_commands();
     return 0;

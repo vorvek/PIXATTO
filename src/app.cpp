@@ -1,8 +1,10 @@
 #include "pixelizer/app.hpp"
 
 #include <imgui.h>
+#include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl3.h>
-#include <imgui_impl_sdlrenderer3.h>
+
+#include <SDL3/SDL_opengl.h>
 
 #include <algorithm>
 #include <array>
@@ -10,10 +12,19 @@
 #include <chrono>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <exception>
 #include <filesystem>
+#include <fstream>
 #include <functional>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <thread>
 #include <utility>
 
 namespace pixelizer {
@@ -21,8 +32,15 @@ namespace {
 
 constexpr int kInitialWidth = 1440;
 constexpr int kInitialHeight = 900;
+constexpr const char* kGlslVersion =
+#if defined(__APPLE__)
+    "#version 150\n";
+#else
+    "#version 130\n";
+#endif
 constexpr float kViewportSplitterThickness = 8.0F;
 constexpr float kViewportMinimumPaneSize = 180.0F;
+constexpr const char* kModelTextureDragPayload = "PIXELIZER_MODEL_TEXTURE_INDEX";
 constexpr const char* kLospecPaletteCredits[] = {
     "pico-8",
     "dawnbringer-16",
@@ -42,6 +60,65 @@ constexpr const char* kLospecPaletteCredits[] = {
     "amstrad-cpc",
     "apple-ii",
 };
+
+std::mutex& runtime_log_mutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::filesystem::path runtime_log_path()
+{
+    std::error_code ec;
+    std::filesystem::path directory = std::filesystem::temp_directory_path(ec);
+    if (ec || directory.empty()) {
+        directory = std::filesystem::current_path(ec);
+    }
+    if (ec || directory.empty()) {
+        directory = ".";
+    }
+    return directory / "pixelizer_debug.log";
+}
+
+std::string runtime_log_timestamp()
+{
+    const auto now = std::chrono::system_clock::now();
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+    return std::to_string(ms);
+}
+
+void append_runtime_log(std::string_view message)
+{
+    std::lock_guard<std::mutex> lock(runtime_log_mutex());
+    std::ofstream output(runtime_log_path(), std::ios::app);
+    if (!output) {
+        return;
+    }
+
+    output << runtime_log_timestamp()
+           << " [thread " << std::this_thread::get_id() << "] "
+           << message << '\n';
+    output.flush();
+}
+
+void reset_runtime_log()
+{
+    std::lock_guard<std::mutex> lock(runtime_log_mutex());
+    std::ofstream output(runtime_log_path(), std::ios::trunc);
+    if (!output) {
+        return;
+    }
+
+    output << runtime_log_timestamp()
+           << " [thread " << std::this_thread::get_id() << "] "
+           << "Pixelizer runtime log started. path=" << runtime_log_path().string() << '\n';
+    output.flush();
+}
+
+std::string quote_path_for_log(const std::filesystem::path& path)
+{
+    return "\"" + path.string() + "\"";
+}
 
 TextId dither_label(DitherMode mode)
 {
@@ -133,6 +210,21 @@ std::string ensure_extension(std::filesystem::path path, const char* expected_ex
         path.replace_extension(expected_extension);
     }
     return path.string();
+}
+
+std::string lower_extension(std::filesystem::path path)
+{
+    std::string extension = path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return extension;
+}
+
+bool is_importable_image_path(const std::filesystem::path& path)
+{
+    const std::string extension = lower_extension(path);
+    return extension == ".png" || extension == ".jpg" || extension == ".jpeg" || extension == ".bmp";
 }
 
 float fit_zoom_for_size(int width, int height, ImVec2 available)
@@ -322,6 +414,101 @@ Color32 color_from_rgb_floats(const std::array<float, 3>& color)
         static_cast<std::uint8_t>(std::lround(std::clamp(color[2], 0.0F, 1.0F) * 255.0F)),
         255,
     };
+}
+
+ImTextureID imgui_texture_id(std::uintptr_t handle)
+{
+    return static_cast<ImTextureID>(handle);
+}
+
+struct CameraVector {
+    float x = 0.0F;
+    float y = 0.0F;
+    float z = 0.0F;
+};
+
+CameraVector cross(CameraVector lhs, CameraVector rhs)
+{
+    return {
+        lhs.y * rhs.z - lhs.z * rhs.y,
+        lhs.z * rhs.x - lhs.x * rhs.z,
+        lhs.x * rhs.y - lhs.y * rhs.x,
+    };
+}
+
+float dot(CameraVector lhs, CameraVector rhs)
+{
+    return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
+}
+
+CameraVector normalize(CameraVector value)
+{
+    const float length = std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
+    if (length <= 0.00001F) {
+        return {0.0F, 0.0F, 1.0F};
+    }
+    return {value.x / length, value.y / length, value.z / length};
+}
+
+void model_camera_basis(float yaw, float pitch, CameraVector& right, CameraVector& up, CameraVector& forward)
+{
+    const float clamped_pitch = std::clamp(pitch, -1.45F, 1.45F);
+    const CameraVector eye_direction = {
+        std::sin(yaw) * std::cos(clamped_pitch),
+        std::sin(clamped_pitch),
+        std::cos(yaw) * std::cos(clamped_pitch),
+    };
+    forward = normalize({-eye_direction.x, -eye_direction.y, -eye_direction.z});
+    right = normalize(cross(forward, {0.0F, 1.0F, 0.0F}));
+    up = normalize(cross(right, forward));
+}
+
+ImVec2 projected_axis(CameraVector axis, CameraVector right, CameraVector up, float length)
+{
+    return ImVec2(dot(axis, right) * length, -dot(axis, up) * length);
+}
+
+void draw_model_gizmo(ImDrawList* draw_list, ImVec2 image_min, ImVec2 image_max, float yaw, float pitch)
+{
+    if (!draw_list || image_max.x - image_min.x < 96.0F || image_max.y - image_min.y < 96.0F) {
+        return;
+    }
+
+    CameraVector right;
+    CameraVector up;
+    CameraVector forward;
+    model_camera_basis(yaw, pitch, right, up, forward);
+
+    struct Axis {
+        CameraVector direction;
+        const char* label = "";
+        ImU32 color = 0;
+        float depth = 0.0F;
+    };
+
+    std::array<Axis, 3> axes = {{
+        {{1.0F, 0.0F, 0.0F}, "X", IM_COL32(224, 73, 73, 255), dot({1.0F, 0.0F, 0.0F}, forward)},
+        {{0.0F, 1.0F, 0.0F}, "Y", IM_COL32(92, 192, 112, 255), dot({0.0F, 1.0F, 0.0F}, forward)},
+        {{0.0F, 0.0F, 1.0F}, "Z", IM_COL32(86, 142, 235, 255), dot({0.0F, 0.0F, 1.0F}, forward)},
+    }};
+    std::sort(axes.begin(), axes.end(), [](const Axis& lhs, const Axis& rhs) {
+        return lhs.depth < rhs.depth;
+    });
+
+    const ImVec2 center(image_max.x - 62.0F, image_min.y + 62.0F);
+    const float radius = 46.0F;
+    const float length = 33.0F;
+    draw_list->AddCircleFilled(center, radius, IM_COL32(10, 12, 16, 120), 32);
+    draw_list->AddCircle(center, radius, IM_COL32(255, 255, 255, 34), 32, 1.0F);
+
+    for (const Axis& axis : axes) {
+        const ImVec2 projected = projected_axis(axis.direction, right, up, length);
+        const ImVec2 end(center.x + projected.x, center.y + projected.y);
+        draw_list->AddLine(center, end, axis.color, 3.0F);
+        draw_list->AddCircleFilled(end, 6.0F, axis.color, 16);
+        draw_list->AddText(ImVec2(end.x + 7.0F, end.y - 8.0F), axis.color, axis.label);
+    }
+    draw_list->AddCircleFilled(center, 3.0F, IM_COL32(235, 238, 244, 220), 12);
 }
 
 void draw_transparency_swatch(const char* id, ImVec2 size)
@@ -596,24 +783,54 @@ App::~App()
 
 bool App::initialize()
 {
+    reset_runtime_log();
+    append_runtime_log("initialize: begin");
     if (!SDL_Init(SDL_INIT_VIDEO)) {
+        append_runtime_log(std::string("initialize: SDL_Init failed: ") + SDL_GetError());
         set_status(textf(TextId::StatusSdlInitFailedFormat, {{"error", SDL_GetError()}}));
         return false;
     }
+    append_runtime_log("initialize: SDL_Init ok");
 
-    window_ = SDL_CreateWindow("Pixelizer", kInitialWidth, kInitialHeight, SDL_WINDOW_RESIZABLE);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+#if defined(__APPLE__)
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+#else
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#endif
+
+    window_ = SDL_CreateWindow("Pixelizer", kInitialWidth, kInitialHeight, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL);
     if (!window_) {
+        append_runtime_log(std::string("initialize: SDL_CreateWindow failed: ") + SDL_GetError());
         set_status(textf(TextId::StatusSdlCreateWindowFailedFormat, {{"error", SDL_GetError()}}));
         return false;
     }
+    append_runtime_log("initialize: SDL_CreateWindow ok");
     set_window_icon(window_);
 
-    renderer_ = SDL_CreateRenderer(window_, nullptr);
-    if (!renderer_) {
-        set_status(textf(TextId::StatusSdlCreateRendererFailedFormat, {{"error", SDL_GetError()}}));
+    gl_context_ = SDL_GL_CreateContext(window_);
+    if (!gl_context_) {
+        append_runtime_log(std::string("initialize: SDL_GL_CreateContext failed: ") + SDL_GetError());
+        set_status(textf(TextId::StatusRendererSetupFailedFormat, {{"error", SDL_GetError()}}));
         return false;
     }
-    SDL_SetRenderVSync(renderer_, 1);
+    append_runtime_log("initialize: SDL_GL_CreateContext ok");
+    SDL_GL_MakeCurrent(window_, gl_context_);
+    SDL_GL_SetSwapInterval(1);
+
+    std::string renderer_error;
+    if (!model_renderer_.initialize(kGlslVersion, renderer_error)) {
+        append_runtime_log(std::string("initialize: model renderer setup failed: ") + renderer_error);
+        set_status(textf(TextId::StatusRendererSetupFailedFormat, {{"error", renderer_error}}));
+        return false;
+    }
+    append_runtime_log("initialize: model renderer setup ok");
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -628,11 +845,12 @@ bool App::initialize()
     style.GrabRounding = 4.0F;
 
     configure_fonts();
-    ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_);
-    ImGui_ImplSDLRenderer3_Init(renderer_);
+    ImGui_ImplSDL3_InitForOpenGL(window_, gl_context_);
+    ImGui_ImplOpenGL3_Init(kGlslVersion);
     SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);
 
     refresh_palettes();
+    append_runtime_log("initialize: complete");
     return true;
 }
 
@@ -642,6 +860,7 @@ int App::run()
     while (running_) {
         process_events(running_);
         drain_file_commands();
+        update_pending_model_load();
         update_preview_if_needed();
         render_frame();
     }
@@ -653,16 +872,18 @@ void App::shutdown()
 {
     destroy_texture(original_texture_);
     destroy_texture(result_texture_);
+    clear_model_document();
+    model_renderer_.shutdown();
 
     if (ImGui::GetCurrentContext()) {
-        ImGui_ImplSDLRenderer3_Shutdown();
+        ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();
     }
 
-    if (renderer_) {
-        SDL_DestroyRenderer(renderer_);
-        renderer_ = nullptr;
+    if (gl_context_) {
+        SDL_GL_DestroyContext(gl_context_);
+        gl_context_ = nullptr;
     }
 
     if (window_) {
@@ -686,14 +907,26 @@ void App::process_events(bool& running)
             running = false;
         }
         if (!file_commands_.dialog_open() && event.type == SDL_EVENT_DROP_FILE && event.drop.data) {
-            file_commands_.submit_drop(event.drop.data, !original_.empty());
+            const std::filesystem::path dropped_path(event.drop.data);
+            append_runtime_log(std::string("drop: received ") + quote_path_for_log(dropped_path));
+            if (document_mode_ == DocumentMode::Model && is_importable_image_path(dropped_path)) {
+                append_runtime_log("drop: importing image into model texture drawer");
+                import_model_texture_from_path(dropped_path);
+            } else {
+                append_runtime_log("drop: queueing file command");
+                file_commands_.submit_drop(dropped_path, document_mode_ == DocumentMode::Model || !original_.empty());
+            }
         }
     }
 }
 
 void App::render_frame()
 {
-    ImGui_ImplSDLRenderer3_NewFrame();
+    if (!ensure_gl_context_current()) {
+        return;
+    }
+
+    ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
 
@@ -739,14 +972,19 @@ void App::render_frame()
     render_palette_color_popup();
     render_save_palette_popup();
     render_language_picker_popup();
+    render_help_dialog();
     render_about_dialog();
 
     ImGui::Render();
 
-    SDL_SetRenderDrawColor(renderer_, 22, 24, 28, 255);
-    SDL_RenderClear(renderer_);
-    ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer_);
-    SDL_RenderPresent(renderer_);
+    int drawable_width = 0;
+    int drawable_height = 0;
+    SDL_GetWindowSizeInPixels(window_, &drawable_width, &drawable_height);
+    glViewport(0, 0, drawable_width, drawable_height);
+    glClearColor(22.0F / 255.0F, 24.0F / 255.0F, 28.0F / 255.0F, 1.0F);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    SDL_GL_SwapWindow(window_);
 }
 
 void App::render_menu_bar()
@@ -760,12 +998,17 @@ void App::render_menu_bar()
         ImGui::BeginDisabled();
     }
 
-    if (ImGui::Button(imgui_label(TextId::OpenImage, "OpenImage").c_str())) {
-        request_open_image();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button(imgui_label(TextId::ImportPalette, "ImportPalette").c_str())) {
-        request_import_palette();
+    if (ImGui::BeginMenu(imgui_label(TextId::Import, "Import").c_str())) {
+        if (ImGui::MenuItem(imgui_label(TextId::OpenImage, "ImportImage").c_str())) {
+            request_open_image();
+        }
+        if (ImGui::MenuItem(imgui_label(TextId::ImportPalette, "ImportPalette").c_str())) {
+            request_import_palette();
+        }
+        if (ImGui::MenuItem(imgui_label(TextId::ImportModel, "ImportModel").c_str())) {
+            request_open_model();
+        }
+        ImGui::EndMenu();
     }
     ImGui::SameLine();
     if (ImGui::BeginMenu(imgui_label(TextId::Export, "Export").c_str())) {
@@ -801,10 +1044,13 @@ void App::render_menu_bar()
 
     const ImGuiStyle& style = ImGui::GetStyle();
     const float language_width = language_button_width(language_);
+    const float help_width = std::max(
+        ImGui::GetFrameHeight(),
+        ImGui::CalcTextSize(text(TextId::HelpButtonLabel)).x + style.FramePadding.x * 2.0F);
     const float about_width = std::max(
         ImGui::GetFrameHeight(),
         ImGui::CalcTextSize(text(TextId::AboutButtonLabel)).x + style.FramePadding.x * 2.0F);
-    const float right_controls_width = language_width + style.ItemSpacing.x + about_width;
+    const float right_controls_width = language_width + style.ItemSpacing.x + help_width + style.ItemSpacing.x + about_width;
     const float right_controls_x = std::max(
         ImGui::GetCursorPosX(),
         ImGui::GetWindowWidth() - right_controls_width - style.WindowPadding.x);
@@ -829,6 +1075,13 @@ void App::render_menu_bar()
     ImGui::SetCursorPosX(right_controls_x);
     if (render_language_button(language_, language_width)) {
         open_language_picker_ = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(imgui_label(TextId::HelpButtonLabel, "HelpButton").c_str(), ImVec2(help_width, 0.0F))) {
+        open_help_dialog_ = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", text(TextId::HelpButtonTooltip));
     }
     ImGui::SameLine();
     if (ImGui::Button(imgui_label(TextId::AboutButtonLabel, "AboutButton").c_str(), ImVec2(about_width, 0.0F))) {
@@ -916,6 +1169,66 @@ void App::render_language_picker_popup()
     ImGui::PopStyleVar();
 }
 
+void App::render_help_dialog()
+{
+    const std::string popup_id = imgui_label(TextId::HelpWindowTitle, "HelpDialog");
+
+    if (open_help_dialog_) {
+        ImGui::OpenPopup(popup_id.c_str());
+        open_help_dialog_ = false;
+    }
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const float popup_width = std::min(560.0F, std::max(340.0F, viewport->WorkSize.x - 32.0F));
+    const float popup_height = std::min(500.0F, std::max(330.0F, viewport->WorkSize.y - 32.0F));
+    ImGui::SetNextWindowSize(ImVec2(popup_width, popup_height), ImGuiCond_Appearing);
+
+    bool popup_open = true;
+    if (!ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_NoSavedSettings)) {
+        return;
+    }
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float close_button_area = ImGui::GetFrameHeightWithSpacing() + style.ItemSpacing.y;
+    const float content_height = std::max(170.0F, ImGui::GetContentRegionAvail().y - close_button_area);
+    auto wrapped_bullet = [](const char* value) {
+        ImGui::Bullet();
+        ImGui::SameLine();
+        ImGui::TextWrapped("%s", value);
+    };
+    auto section = [&](TextId title) {
+        ImGui::Spacing();
+        ImGui::TextUnformatted(text(title));
+        ImGui::Separator();
+    };
+
+    ImGui::BeginChild("##HelpContent", ImVec2(0.0F, content_height), ImGuiChildFlags_None);
+    section(TextId::HelpSectionKeyboard);
+    wrapped_bullet(text(TextId::HelpUndo));
+    wrapped_bullet(text(TextId::HelpRedo));
+    wrapped_bullet(text(TextId::HelpNumericEntry));
+
+    section(TextId::HelpSectionMouse);
+    wrapped_bullet(text(TextId::HelpImageZoom));
+    wrapped_bullet(text(TextId::HelpModelOrbit));
+    wrapped_bullet(text(TextId::HelpModelPan));
+    wrapped_bullet(text(TextId::HelpModelZoom));
+    wrapped_bullet(text(TextId::HelpModelReset));
+    wrapped_bullet(text(TextId::HelpModelOrigin));
+
+    section(TextId::HelpSectionFiles);
+    wrapped_bullet(text(TextId::HelpDragDropFiles));
+    wrapped_bullet(text(TextId::HelpTextureAssign));
+    ImGui::EndChild();
+
+    ImGui::Spacing();
+    if (ImGui::Button(imgui_label(TextId::Close, "CloseHelpDialog").c_str()) || !popup_open) {
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+}
+
 void App::render_about_dialog()
 {
     const std::string popup_id = imgui_label(TextId::AboutWindowTitle, "AboutDialog");
@@ -957,6 +1270,8 @@ void App::render_about_dialog()
     wrapped_bullet(text(TextId::AboutDependencySdl));
     wrapped_bullet(text(TextId::AboutDependencyImGui));
     wrapped_bullet(text(TextId::AboutDependencyStb));
+    wrapped_bullet(text(TextId::AboutDependencyTinyGltf));
+    wrapped_bullet(text(TextId::AboutDependencyTinyObj));
 
     ImGui::Spacing();
     ImGui::TextUnformatted(text(TextId::AboutPalettesTitle));
@@ -977,11 +1292,115 @@ void App::render_about_dialog()
     ImGui::EndPopup();
 }
 
+void App::render_model_materials()
+{
+    ImGui::TextUnformatted(text(TextId::ModelMaterials));
+    ImGui::Separator();
+
+    if (model_.empty()) {
+        ImGui::TextDisabled("%s", text(TextId::NoModelLoaded));
+        return;
+    }
+
+    const std::vector<ModelMaterialSlot> slots = model_material_slots();
+    for (std::size_t index = 0; index < slots.size(); ++index) {
+        const ModelMaterialSlot& slot = slots[index];
+        std::string name = slot.material_name.empty() ? slot.mesh_name : slot.material_name;
+        if (name.empty()) {
+            name = "Material " + std::to_string(index + 1U);
+        } else if (!slot.material_name.empty() && !slot.mesh_name.empty() && slot.material_name != slot.mesh_name) {
+            name = slot.mesh_name + " / " + slot.material_name;
+        }
+
+        const std::string current = slot.texture_index >= 0
+            ? model_texture_display_name(static_cast<std::size_t>(slot.texture_index))
+            : std::string(text(TextId::UntexturedGrey));
+
+        ImGui::PushID(static_cast<int>(index));
+        ImGui::BeginChild("MaterialSlot", ImVec2(0.0F, 66.0F), ImGuiChildFlags_Borders);
+        ImGui::TextWrapped("%s", name.c_str());
+        ImGui::TextDisabled("%s", current.c_str());
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kModelTextureDragPayload)) {
+                if (payload->DataSize == static_cast<int>(sizeof(int))) {
+                    int texture_index = -1;
+                    std::memcpy(&texture_index, payload->Data, sizeof(texture_index));
+                    if (texture_index >= 0) {
+                        assign_model_texture_to_slot(slot, static_cast<std::size_t>(texture_index));
+                    }
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+        if (ImGui::GetDragDropPayload() && ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) {
+            ImGui::SetTooltip("%s", text(TextId::DropTextureOnMaterial));
+        }
+        ImGui::EndChild();
+        ImGui::PopID();
+    }
+}
+
+void App::render_model_texture_drawer()
+{
+    ImGui::Spacing();
+    ImGui::TextUnformatted(text(TextId::TextureDrawer));
+    ImGui::Separator();
+
+    if (model_.textures.empty()) {
+        ImGui::TextWrapped("%s", text(TextId::TextureDrawerHint));
+        return;
+    }
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float thumbnail = 46.0F;
+    for (std::size_t index = 0; index < model_.textures.size(); ++index) {
+        ImGui::PushID(static_cast<int>(index));
+        const Texture* preview = index < model_original_textures_.size() ? &model_original_textures_[index] : nullptr;
+        const bool has_preview = preview && preview->handle != 0U && preview->width > 0 && preview->height > 0;
+        if (has_preview) {
+            const float scale = std::min(thumbnail / static_cast<float>(preview->width), thumbnail / static_cast<float>(preview->height));
+            const ImVec2 size(
+                std::max(1.0F, static_cast<float>(preview->width) * scale),
+                std::max(1.0F, static_cast<float>(preview->height) * scale));
+            ImGui::Image(imgui_texture_id(preview->handle), size);
+        } else {
+            ImGui::Button("##TexturePlaceholder", ImVec2(thumbnail, thumbnail));
+        }
+
+        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+            const int payload_index = static_cast<int>(index);
+            ImGui::SetDragDropPayload(kModelTextureDragPayload, &payload_index, sizeof(payload_index));
+            const std::string name = model_texture_display_name(index);
+            ImGui::TextUnformatted(name.c_str());
+            ImGui::EndDragDropSource();
+        }
+
+        ImGui::SameLine();
+        const float text_width = std::max(60.0F, ImGui::GetContentRegionAvail().x);
+        ImGui::BeginGroup();
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + text_width);
+        ImGui::TextUnformatted(model_texture_display_name(index).c_str());
+        ImGui::PopTextWrapPos();
+        if (model_.textures[index].embedded) {
+            ImGui::TextDisabled("%s", "Embedded");
+        }
+        ImGui::EndGroup();
+        ImGui::Dummy(ImVec2(0.0F, style.ItemSpacing.y));
+        ImGui::PopID();
+    }
+}
+
 void App::render_controls()
 {
     auto edit = edit_session_.begin_edit();
     ProcessSettings& settings = edit.settings();
     int& selected_palette = edit.selected_palette();
+
+    if (document_mode_ == DocumentMode::Model) {
+        render_model_materials();
+        render_model_texture_drawer();
+        ImGui::Spacing();
+    }
 
     ImGui::TextUnformatted(text(TextId::Pixelize));
     ImGui::Separator();
@@ -1259,7 +1678,7 @@ void App::render_viewports()
 
     if (viewport_mode_ == ViewportMode::Single) {
         ImGui::BeginChild("ResultPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-        render_image_view(TextId::Result, "Result", result_texture_, result_zoom_);
+        render_working_view();
         ImGui::EndChild();
         return;
     }
@@ -1267,7 +1686,7 @@ void App::render_viewports()
     if (viewport_layout_ == ViewportLayout::SideBySide) {
         if (available.x <= kViewportSplitterThickness * 2.0F) {
             ImGui::BeginChild("OriginalPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-            render_image_view(TextId::Original, "Original", original_texture_, original_zoom_);
+            render_original_view();
             ImGui::EndChild();
             return;
         }
@@ -1278,7 +1697,7 @@ void App::render_viewports()
         viewport_split_ratio_ = ratio_from_split_size(original_width, usable_width);
 
         ImGui::BeginChild("OriginalPane", ImVec2(original_width, 0), ImGuiChildFlags_Borders);
-        render_image_view(TextId::Original, "Original", original_texture_, original_zoom_);
+        render_original_view();
         ImGui::EndChild();
 
         ImGui::SameLine(0.0F, 0.0F);
@@ -1290,12 +1709,12 @@ void App::render_viewports()
 
         ImGui::SameLine(0.0F, 0.0F);
         ImGui::BeginChild("ResultPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-        render_image_view(TextId::Result, "Result", result_texture_, result_zoom_);
+        render_working_view();
         ImGui::EndChild();
     } else {
         if (available.y <= kViewportSplitterThickness * 2.0F) {
             ImGui::BeginChild("ResultPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-            render_image_view(TextId::Result, "Result", result_texture_, result_zoom_);
+            render_working_view();
             ImGui::EndChild();
             return;
         }
@@ -1306,7 +1725,7 @@ void App::render_viewports()
         viewport_split_ratio_ = ratio_from_split_size(result_height, usable_height);
 
         ImGui::BeginChild("ResultPane", ImVec2(0, result_height), ImGuiChildFlags_Borders);
-        render_image_view(TextId::Result, "Result", result_texture_, result_zoom_);
+        render_working_view();
         ImGui::EndChild();
 
         remove_vertical_item_spacing();
@@ -1318,9 +1737,29 @@ void App::render_viewports()
 
         remove_vertical_item_spacing();
         ImGui::BeginChild("OriginalPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-        render_image_view(TextId::Original, "Original", original_texture_, original_zoom_);
+        render_original_view();
         ImGui::EndChild();
     }
+}
+
+void App::render_original_view()
+{
+    if (document_mode_ == DocumentMode::Model) {
+        render_model_texture_gallery();
+        return;
+    }
+
+    render_image_view(TextId::Original, "Original", original_texture_, original_zoom_);
+}
+
+void App::render_working_view()
+{
+    if (document_mode_ == DocumentMode::Model) {
+        render_model_view();
+        return;
+    }
+
+    render_image_view(TextId::Result, "Result", result_texture_, result_zoom_);
 }
 
 void App::render_image_view(TextId label, const char* id, Texture& texture, float& zoom)
@@ -1345,7 +1784,7 @@ void App::render_image_view(TextId label, const char* id, Texture& texture, floa
     ImGui::Separator();
 
     ImGui::BeginChild((std::string(id) + "Scroll").c_str(), ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar);
-    if (!texture.handle) {
+    if (texture.handle == 0U) {
         const ImVec2 avail = ImGui::GetContentRegionAvail();
         ImGui::SetCursorPos(ImVec2(std::max(0.0F, (avail.x - 140.0F) * 0.5F), std::max(0.0F, (avail.y - 20.0F) * 0.5F)));
         ImGui::TextDisabled("%s", text(TextId::NoImageLoaded));
@@ -1355,7 +1794,131 @@ void App::render_image_view(TextId label, const char* id, Texture& texture, floa
         }
 
         const ImVec2 size(static_cast<float>(texture.width) * zoom, static_cast<float>(texture.height) * zoom);
-        ImGui::Image(reinterpret_cast<ImTextureID>(texture.handle), size);
+        ImGui::Image(imgui_texture_id(texture.handle), size);
+    }
+    ImGui::EndChild();
+}
+
+void App::render_model_texture_gallery()
+{
+    ImGui::TextUnformatted(text(TextId::OriginalTextures));
+    ImGui::Separator();
+
+    ImGui::BeginChild("ModelTextureGalleryScroll", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar);
+    if (model_original_textures_.empty()) {
+        const ImVec2 avail = ImGui::GetContentRegionAvail();
+        ImGui::SetCursorPos(ImVec2(std::max(0.0F, (avail.x - 170.0F) * 0.5F), std::max(0.0F, (avail.y - 20.0F) * 0.5F)));
+        ImGui::TextDisabled("%s", text(TextId::NoModelTextures));
+        ImGui::EndChild();
+        return;
+    }
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float available_width = std::max(120.0F, ImGui::GetContentRegionAvail().x - style.ScrollbarSize - style.ItemSpacing.x);
+    const float thumbnail_width = std::min(260.0F, available_width);
+    for (std::size_t index = 0; index < model_original_textures_.size(); ++index) {
+        const ModelTexture& source = model_.textures[index];
+        Texture& texture = model_original_textures_[index];
+        ImGui::PushID(static_cast<int>(index));
+        ImGui::TextWrapped("%s", source.name.empty() ? default_model_texture_export_name(source, index).c_str() : source.name.c_str());
+        if (texture.handle != 0U && texture.width > 0 && texture.height > 0) {
+            const float scale = std::min(thumbnail_width / static_cast<float>(texture.width), 220.0F / static_cast<float>(texture.height));
+            const ImVec2 size(
+                std::max(1.0F, static_cast<float>(texture.width) * std::max(scale, 0.05F)),
+                std::max(1.0F, static_cast<float>(texture.height) * std::max(scale, 0.05F)));
+            ImGui::Image(imgui_texture_id(texture.handle), size);
+        }
+        ImGui::Spacing();
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+}
+
+void App::render_model_view()
+{
+    ImGui::TextUnformatted(text(TextId::ModelPreview));
+    ImGui::SameLine();
+    if (ImGui::SmallButton(imgui_label(TextId::ResetView, "ResetModelView").c_str())) {
+        reset_model_camera();
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton(imgui_label(TextId::ResetToOrigin, "ResetModelOrigin").c_str())) {
+        reset_model_camera_to_origin();
+    }
+    ImGui::Separator();
+
+    ImGui::BeginChild("ModelPreviewScroll", ImVec2(0, 0), ImGuiChildFlags_None);
+    const ImVec2 available = ImGui::GetContentRegionAvail();
+    const int preview_width = std::max(1, static_cast<int>(std::floor(available.x)));
+    const int preview_height = std::max(1, static_cast<int>(std::floor(available.y)));
+
+    if (model_.empty()) {
+        ImGui::SetCursorPos(ImVec2(std::max(0.0F, (available.x - 140.0F) * 0.5F), std::max(0.0F, (available.y - 20.0F) * 0.5F)));
+        ImGui::TextDisabled("%s", text(TextId::NoModelLoaded));
+        ImGui::EndChild();
+        return;
+    }
+
+    if (!ensure_gl_context_current()) {
+        ImGui::EndChild();
+        return;
+    }
+
+    std::string error;
+    const bool log_preview_frame = model_preview_log_frames_ > 0;
+    if (log_preview_frame) {
+        append_runtime_log(
+            std::string("model-preview: render_preview begin ")
+            + std::to_string(preview_width) + "x" + std::to_string(preview_height)
+            + " primitives=" + std::to_string(model_.primitives.size())
+            + " textures=" + std::to_string(model_processed_textures_.size()));
+    }
+    const std::uintptr_t preview_texture = model_renderer_.render_preview(
+        model_,
+        preview_width,
+        preview_height,
+        model_yaw_,
+        model_pitch_,
+        model_distance_,
+        model_target_offset_x_,
+        model_target_offset_y_,
+        model_target_offset_z_,
+        error);
+    if (log_preview_frame) {
+        append_runtime_log(
+            std::string("model-preview: render_preview end texture=") + std::to_string(preview_texture)
+            + " error=" + (error.empty() ? std::string("<none>") : error));
+        --model_preview_log_frames_;
+    }
+    if (!error.empty()) {
+        append_runtime_log(std::string("model-preview: render error: ") + error);
+        set_status(textf(TextId::StatusModelRenderFailedFormat, {{"error", error}}));
+    }
+
+    if (preview_texture != 0U) {
+        ImGui::Image(
+            imgui_texture_id(preview_texture),
+            ImVec2(static_cast<float>(preview_width), static_cast<float>(preview_height)),
+            ImVec2(0.0F, 1.0F),
+            ImVec2(1.0F, 0.0F));
+        const ImVec2 image_min = ImGui::GetItemRectMin();
+        const ImVec2 image_max = ImGui::GetItemRectMax();
+        draw_model_gizmo(ImGui::GetWindowDrawList(), image_min, image_max, model_yaw_, model_pitch_);
+        if (ImGui::IsItemHovered()) {
+            ImGuiIO& io = ImGui::GetIO();
+            const bool pan_drag = ImGui::IsMouseDragging(ImGuiMouseButton_Middle)
+                || ImGui::IsMouseDragging(ImGuiMouseButton_Right)
+                || (io.KeyShift && ImGui::IsMouseDragging(ImGuiMouseButton_Left));
+            if (pan_drag) {
+                pan_model_camera(io.MouseDelta.x, io.MouseDelta.y);
+            } else if (ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+                model_yaw_ += io.MouseDelta.x * 0.01F;
+                model_pitch_ = std::clamp(model_pitch_ + io.MouseDelta.y * 0.01F, -1.45F, 1.45F);
+            }
+            if (io.MouseWheel != 0.0F) {
+                model_distance_ = std::clamp(model_distance_ * (io.MouseWheel > 0.0F ? 0.88F : 1.14F), 0.8F, 12.0F);
+            }
+        }
     }
     ImGui::EndChild();
 }
@@ -1423,7 +1986,7 @@ void App::render_number_edit_popup()
 
 void App::render_drop_confirm_popup()
 {
-    const std::string popup_id = imgui_label(TextId::OpenDroppedImageTitle, "OpenDroppedImage");
+    const std::string popup_id = imgui_label(TextId::OpenDroppedFileTitle, "OpenDroppedFile");
 
     if (open_drop_confirm_) {
         ImGui::OpenPopup(popup_id.c_str());
@@ -1437,7 +2000,7 @@ void App::render_drop_confirm_popup()
     bool popup_open = true;
     bool reset_popup = false;
     if (ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted(text(TextId::ReplaceDroppedImage));
+        ImGui::TextUnformatted(text(TextId::ReplaceDroppedFile));
         ImGui::Spacing();
         ImGui::TextWrapped("%s", pending_dropped_image_->filename().string().c_str());
 
@@ -1446,7 +2009,7 @@ void App::render_drop_confirm_popup()
             pending_dropped_image_.reset();
             ImGui::CloseCurrentPopup();
             reset_popup = true;
-            load_image_from_path(path);
+            load_document_from_path(path);
         }
         ImGui::SameLine();
         if (ImGui::Button(imgui_label(TextId::Cancel, "CancelDroppedImage").c_str()) || !popup_open) {
@@ -1753,13 +2316,25 @@ void App::handle_shortcuts()
 
 void App::update_preview_if_needed()
 {
-    if (!edit_session_.preview_dirty() || original_.empty()) {
+    if (!edit_session_.preview_dirty()) {
         return;
     }
 
     const auto started = std::chrono::steady_clock::now();
-    result_ = process_image(original_, edit_session_.settings());
-    rebuild_texture(result_texture_, result_, true);
+    if (document_mode_ == DocumentMode::Image) {
+        if (original_.empty()) {
+            return;
+        }
+        result_ = process_image(original_, edit_session_.settings());
+        rebuild_texture(result_texture_, result_, true);
+    } else {
+        model_processed_textures_.clear();
+        model_processed_textures_.reserve(model_.textures.size());
+        for (const ModelTexture& texture : model_.textures) {
+            model_processed_textures_.push_back(process_image(texture.image, edit_session_.settings()));
+        }
+        model_renderer_.update_processed_textures(model_processed_textures_);
+    }
     edit_session_.clear_preview_dirty();
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
@@ -1772,18 +2347,37 @@ void App::rebuild_texture(Texture& texture, const Image& image, bool nearest)
     if (image.empty()) {
         return;
     }
-
-    texture.handle = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, image.width, image.height);
-    texture.width = image.width;
-    texture.height = image.height;
-
-    if (!texture.handle) {
-        set_status(textf(TextId::StatusSdlCreateTextureFailedFormat, {{"error", SDL_GetError()}}));
+    if (!ensure_gl_context_current()) {
         return;
     }
 
-    SDL_SetTextureScaleMode(texture.handle, nearest ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR);
-    SDL_UpdateTexture(texture.handle, nullptr, image.rgba.data(), image.width * 4);
+    GLuint handle = 0;
+    glGenTextures(1, &handle);
+    texture.handle = handle;
+    texture.width = image.width;
+    texture.height = image.height;
+
+    if (texture.handle == 0U) {
+        set_status(textf(TextId::StatusTextureCreationFailedFormat, {{"error", "OpenGL texture id was 0"}}));
+        return;
+    }
+
+    glBindTexture(GL_TEXTURE_2D, texture.handle);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, nearest ? GL_NEAREST : GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, nearest ? GL_NEAREST : GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(
+        GL_TEXTURE_2D,
+        0,
+        GL_RGBA,
+        image.width,
+        image.height,
+        0,
+        GL_RGBA,
+        GL_UNSIGNED_BYTE,
+        image.rgba.data());
 }
 
 void App::configure_fonts()
@@ -1855,9 +2449,10 @@ void App::configure_fonts()
 
 void App::destroy_texture(Texture& texture)
 {
-    if (texture.handle) {
-        SDL_DestroyTexture(texture.handle);
-        texture.handle = nullptr;
+    if (texture.handle != 0U) {
+        const GLuint handle = texture.handle;
+        glDeleteTextures(1, &handle);
+        texture.handle = 0;
     }
     texture.width = 0;
     texture.height = 0;
@@ -1868,6 +2463,11 @@ void App::request_open_image()
     (void)file_commands_.request_open_image_dialog(window_, file_dialog_labels());
 }
 
+void App::request_open_model()
+{
+    (void)file_commands_.request_open_model_dialog(window_, file_dialog_labels());
+}
+
 void App::request_import_palette()
 {
     (void)file_commands_.request_import_palette_dialog(window_, file_dialog_labels());
@@ -1875,12 +2475,60 @@ void App::request_import_palette()
 
 void App::request_export_png()
 {
+    if (document_mode_ == DocumentMode::Model) {
+        pending_model_texture_exports_.clear();
+        std::vector<bool> referenced(model_processed_textures_.size(), false);
+        for (const ModelPrimitive& primitive : model_.primitives) {
+            if (primitive.texture_index >= 0 && primitive.texture_index < static_cast<int>(referenced.size())) {
+                referenced[static_cast<std::size_t>(primitive.texture_index)] = true;
+            }
+        }
+        for (std::size_t index = 0; index < referenced.size(); ++index) {
+            if (referenced[index]) {
+                pending_model_texture_exports_.push_back(index);
+            }
+        }
+        if (pending_model_texture_exports_.empty()) {
+            set_status(text(TextId::StatusModelExportSkipped));
+            return;
+        }
+        request_next_model_texture_export();
+        return;
+    }
+
     (void)file_commands_.request_export_png_dialog(window_, file_dialog_labels());
 }
 
 void App::request_export_raw()
 {
+    if (document_mode_ == DocumentMode::Model) {
+        set_status(text(TextId::StatusModelRawExportUnavailable));
+        return;
+    }
+
     (void)file_commands_.request_export_raw_dialog(window_, file_dialog_labels());
+}
+
+void App::request_next_model_texture_export()
+{
+    if (pending_model_texture_exports_.empty() || file_commands_.dialog_open()) {
+        return;
+    }
+
+    const std::size_t texture_index = pending_model_texture_exports_.front();
+    pending_model_texture_exports_.pop_front();
+    if (texture_index >= model_.textures.size()) {
+        request_next_model_texture_export();
+        return;
+    }
+
+    std::filesystem::path default_path = current_image_path_.parent_path()
+        / default_model_texture_export_name(model_.textures[texture_index], texture_index);
+    (void)file_commands_.request_export_model_texture_png_dialog(
+        window_,
+        file_dialog_labels(),
+        default_path,
+        static_cast<int>(texture_index));
 }
 
 void App::drain_file_commands()
@@ -1890,17 +2538,63 @@ void App::drain_file_commands()
     }
 }
 
+void App::update_pending_model_load()
+{
+    if (!pending_model_load_) {
+        return;
+    }
+
+    using namespace std::chrono_literals;
+    if (pending_model_load_->result.wait_for(0ms) != std::future_status::ready) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now - pending_model_load_->last_log >= 1000ms) {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - pending_model_load_->started_at).count();
+            append_runtime_log(
+                std::string("model-load: still waiting after ") + std::to_string(elapsed) + " ms for "
+                + quote_path_for_log(pending_model_load_->source));
+            pending_model_load_->last_log = now;
+        }
+        return;
+    }
+
+    append_runtime_log(std::string("model-load: future ready for ") + quote_path_for_log(pending_model_load_->source));
+    PendingModelLoadState load = std::move(*pending_model_load_);
+    pending_model_load_.reset();
+    try {
+        finish_model_load_from_path(load.source, load.result.get());
+    } catch (const std::exception& error) {
+        append_runtime_log(std::string("model-load: finish threw exception: ") + error.what());
+        set_status(textf(TextId::StatusModelLoadFailedFormat, {{"error", error.what()}}));
+    } catch (...) {
+        append_runtime_log("model-load: finish threw unknown exception");
+        set_status(textf(TextId::StatusModelLoadFailedFormat, {{"error", "unknown error"}}));
+    }
+}
+
 void App::handle_file_command(const FileCommand& command)
 {
     switch (command.kind) {
     case FileCommandKind::OpenImage:
-        load_image_from_path(command.path);
+        if (document_mode_ == DocumentMode::Model && !model_.empty()) {
+            import_model_texture_from_path(command.path);
+        } else {
+            load_image_from_path(command.path);
+        }
+        break;
+    case FileCommandKind::OpenModel:
+        load_model_from_path(command.path);
         break;
     case FileCommandKind::ImportPalette:
         import_palette_from_path(command.path);
         break;
     case FileCommandKind::ExportPng:
         export_result_to_png_path(command.path);
+        break;
+    case FileCommandKind::ExportModelTexturePng:
+        if (command.index >= 0) {
+            export_model_texture_to_png_path(static_cast<std::size_t>(command.index), command.path);
+            request_next_model_texture_export();
+        }
         break;
     case FileCommandKind::ExportRaw:
         export_result_to_raw_path(command.path);
@@ -1912,19 +2606,41 @@ void App::handle_file_command(const FileCommand& command)
     case FileCommandKind::DialogFailed: {
         const std::string error = command.error.empty() ? "unknown error" : command.error;
         set_status(textf(TextId::StatusFileDialogFailedFormat, {{"error", error}}));
+        pending_model_texture_exports_.clear();
+        break;
+    }
+    case FileCommandKind::DialogCanceled: {
+        pending_model_texture_exports_.clear();
         break;
     }
     }
 }
 
+void App::load_document_from_path(const std::filesystem::path& path)
+{
+    if (is_model_path(path)) {
+        load_model_from_path(path);
+        return;
+    }
+
+    load_image_from_path(path);
+}
+
 void App::load_image_from_path(const std::filesystem::path& path)
 {
+    if (pending_model_load_) {
+        set_status(text(TextId::StatusModelStillLoading));
+        return;
+    }
+
     ImageLoadResult loaded = load_image_rgba(path.string());
     if (!loaded.error.empty()) {
         set_status(textf(TextId::StatusImageLoadFailedFormat, {{"error", loaded.error}}));
         return;
     }
 
+    clear_model_document();
+    document_mode_ = DocumentMode::Image;
     original_ = std::move(loaded.image);
     current_image_path_ = path;
     rebuild_texture(original_texture_, original_, false);
@@ -1932,6 +2648,220 @@ void App::load_image_from_path(const std::filesystem::path& path)
     result_zoom_ = 1.0F;
     mark_dirty();
     set_status(textf(TextId::StatusLoadedFormat, {{"name", path.filename().string()}}));
+}
+
+void App::load_model_from_path(const std::filesystem::path& path)
+{
+    append_runtime_log(std::string("model-load: request ") + quote_path_for_log(path));
+    if (pending_model_load_) {
+        append_runtime_log("model-load: rejected because another load is pending");
+        set_status(text(TextId::StatusModelStillLoading));
+        return;
+    }
+
+    PendingModelLoadState pending;
+    pending.source = path;
+    pending.started_at = std::chrono::steady_clock::now();
+    pending.last_log = pending.started_at;
+    try {
+        pending.result = std::async(std::launch::async, [path]() {
+            try {
+                append_runtime_log(std::string("model-load-thread: begin load_model_document ") + quote_path_for_log(path));
+                ModelLoadResult result = load_model_document(path);
+                append_runtime_log(
+                    std::string("model-load-thread: finished load_model_document error=")
+                    + (result.error.empty() ? "<none>" : result.error)
+                    + " primitives=" + std::to_string(result.model.primitives.size())
+                    + " textures=" + std::to_string(result.model.textures.size()));
+                return result;
+            } catch (const std::exception& error) {
+                append_runtime_log(std::string("model-load-thread: exception: ") + error.what());
+                ModelLoadResult result;
+                result.error = error.what();
+                return result;
+            } catch (...) {
+                append_runtime_log("model-load-thread: unknown exception");
+                ModelLoadResult result;
+                result.error = "unknown error";
+                return result;
+            }
+        });
+    } catch (const std::exception& error) {
+        append_runtime_log(std::string("model-load: std::async failed: ") + error.what());
+        set_status(textf(TextId::StatusModelLoadFailedFormat, {{"error", error.what()}}));
+        return;
+    }
+    pending_model_load_ = std::move(pending);
+    append_runtime_log(std::string("model-load: async started ") + quote_path_for_log(path));
+    set_status(textf(TextId::StatusModelLoadingFormat, {{"name", path.filename().string()}}));
+}
+
+void App::finish_model_load_from_path(const std::filesystem::path& path, ModelLoadResult loaded)
+{
+    append_runtime_log(
+        std::string("model-load: finish begin error=") + (loaded.error.empty() ? "<none>" : loaded.error)
+        + " primitives=" + std::to_string(loaded.model.primitives.size())
+        + " textures=" + std::to_string(loaded.model.textures.size()));
+    if (!loaded.error.empty()) {
+        set_status(textf(TextId::StatusModelLoadFailedFormat, {{"error", loaded.error}}));
+        append_runtime_log("model-load: finish aborting because load result has error");
+        return;
+    }
+
+    append_runtime_log("model-load: clearing existing document");
+    clear_model_document();
+    destroy_texture(original_texture_);
+    destroy_texture(result_texture_);
+    original_ = {};
+    result_ = {};
+    document_mode_ = DocumentMode::Model;
+    model_ = std::move(loaded.model);
+    current_image_path_ = path;
+    reset_model_camera();
+    viewport_mode_ = ViewportMode::Split;
+    viewport_layout_ = ViewportLayout::Stacked;
+    viewport_split_ratio_ = 0.62F;
+
+    append_runtime_log("model-load: processing source textures begin");
+    model_original_textures_.resize(model_.textures.size());
+    model_processed_textures_.clear();
+    model_processed_textures_.reserve(model_.textures.size());
+    for (std::size_t index = 0; index < model_.textures.size(); ++index) {
+        rebuild_texture(model_original_textures_[index], model_.textures[index].image, false);
+        model_processed_textures_.push_back(process_image(model_.textures[index].image, edit_session_.settings()));
+    }
+    append_runtime_log("model-load: processing source textures complete");
+
+    if (!ensure_gl_context_current()) {
+        append_runtime_log("model-load: finish aborting because GL context could not be made current");
+        return;
+    }
+
+    append_runtime_log("model-load: upload_model begin");
+    std::string renderer_error;
+    if (!model_renderer_.upload_model(model_, model_processed_textures_, renderer_error)) {
+        append_runtime_log(std::string("model-load: upload_model failed: ") + renderer_error);
+        set_status(textf(TextId::StatusModelRenderFailedFormat, {{"error", renderer_error}}));
+        return;
+    }
+    append_runtime_log("model-load: upload_model complete");
+    model_preview_log_frames_ = 3;
+
+    edit_session_.clear_preview_dirty();
+    if (model_.used_fallback_texture) {
+        set_status(textf(TextId::StatusModelLoadedWithFallbackFormat, {{"name", path.filename().string()}}));
+    } else {
+        set_status(textf(TextId::StatusModelLoadedFormat, {{"name", path.filename().string()}}));
+    }
+    append_runtime_log("model-load: finish complete");
+}
+
+void App::import_model_texture_from_path(const std::filesystem::path& path)
+{
+    if (document_mode_ != DocumentMode::Model || model_.empty()) {
+        load_image_from_path(path);
+        return;
+    }
+
+    std::error_code ec;
+    const std::filesystem::path canonical_path = std::filesystem::weakly_canonical(path, ec);
+    const std::string path_key = ec ? path.lexically_normal().string() : canonical_path.string();
+    for (std::size_t index = 0; index < model_.textures.size(); ++index) {
+        const std::filesystem::path& source_path = model_.textures[index].source_path;
+        if (source_path.empty()) {
+            continue;
+        }
+        std::error_code existing_ec;
+        const std::filesystem::path existing_canonical = std::filesystem::weakly_canonical(source_path, existing_ec);
+        const std::string existing_key = existing_ec ? source_path.lexically_normal().string() : existing_canonical.string();
+        if (existing_key == path_key) {
+            set_status(textf(
+                TextId::StatusModelTextureAlreadyImportedFormat,
+                {{"name", model_texture_display_name(index)}}));
+            return;
+        }
+    }
+
+    ImageLoadResult loaded = load_image_rgba(path.string());
+    if (!loaded.error.empty()) {
+        set_status(textf(TextId::StatusImageLoadFailedFormat, {{"error", loaded.error}}));
+        return;
+    }
+
+    ModelTexture texture;
+    texture.name = path.filename().string();
+    if (texture.name.empty()) {
+        texture.name = "texture_" + std::to_string(model_.textures.size()) + ".png";
+    }
+    texture.source_path = path;
+    texture.embedded = false;
+    texture.image = std::move(loaded.image);
+
+    const std::size_t texture_index = model_.textures.size();
+    model_.textures.push_back(std::move(texture));
+
+    model_original_textures_.emplace_back();
+    rebuild_texture(model_original_textures_.back(), model_.textures.back().image, false);
+    model_processed_textures_.push_back(process_image(model_.textures.back().image, edit_session_.settings()));
+    if (!ensure_gl_context_current()) {
+        return;
+    }
+    model_renderer_.update_processed_textures(model_processed_textures_);
+
+    set_status(textf(
+        TextId::StatusModelTextureImportedFormat,
+        {{"name", model_texture_display_name(texture_index)}}));
+}
+
+void App::assign_model_texture_to_slot(const ModelMaterialSlot& slot, std::size_t texture_index)
+{
+    if (texture_index >= model_.textures.size()) {
+        return;
+    }
+
+    bool assigned = false;
+    for (ModelPrimitive& primitive : model_.primitives) {
+        const bool matches = slot.material_index >= 0
+            ? primitive.material_index == slot.material_index
+            : primitive.material_index < 0 && primitive.mesh_index == slot.mesh_index;
+        if (!matches) {
+            continue;
+        }
+        primitive.texture_index = static_cast<int>(texture_index);
+        assigned = true;
+    }
+
+    if (!assigned) {
+        return;
+    }
+
+    model_.used_fallback_texture = false;
+    for (const ModelPrimitive& primitive : model_.primitives) {
+        if (primitive.texture_index < 0) {
+            model_.used_fallback_texture = true;
+            break;
+        }
+    }
+
+    if (!ensure_gl_context_current()) {
+        return;
+    }
+
+    std::string renderer_error;
+    if (!model_renderer_.upload_model(model_, model_processed_textures_, renderer_error)) {
+        set_status(textf(TextId::StatusModelRenderFailedFormat, {{"error", renderer_error}}));
+        return;
+    }
+
+    std::string material_name = slot.material_name.empty() ? slot.mesh_name : slot.material_name;
+    if (material_name.empty()) {
+        material_name = "material";
+    } else if (!slot.material_name.empty() && !slot.mesh_name.empty() && slot.material_name != slot.mesh_name) {
+        material_name = slot.mesh_name + " / " + slot.material_name;
+    }
+    set_status(textf(
+        TextId::StatusModelTextureAssignedFormat,
+        {{"texture", model_texture_display_name(texture_index)}, {"material", material_name}}));
 }
 
 void App::import_palette_from_path(const std::filesystem::path& path)
@@ -2170,6 +3100,24 @@ void App::export_result_to_png_path(const std::filesystem::path& path)
     set_status(textf(TextId::StatusExportedFormat, {{"name", std::filesystem::path(destination).filename().string()}}));
 }
 
+void App::export_model_texture_to_png_path(std::size_t texture_index, const std::filesystem::path& path)
+{
+    if (texture_index >= model_processed_textures_.size()) {
+        set_status(text(TextId::StatusExportSkipped));
+        return;
+    }
+
+    std::string error;
+    const std::string destination = ensure_extension(path, ".png");
+    if (!save_png_rgba(destination, model_processed_textures_[texture_index], error)) {
+        set_status(textf(TextId::StatusExportFailedFormat, {{"error", error}}));
+        return;
+    }
+
+    last_export_path_ = destination;
+    set_status(textf(TextId::StatusExportedFormat, {{"name", std::filesystem::path(destination).filename().string()}}));
+}
+
 void App::export_result_to_raw_path(const std::filesystem::path& path)
 {
     if (result_.empty()) {
@@ -2199,6 +3147,118 @@ void App::export_result_to_raw_path(const std::filesystem::path& path)
     set_status(textf(TextId::StatusExportedFormat, {{"name", std::filesystem::path(destination).filename().string()}}));
 }
 
+void App::clear_model_document()
+{
+    append_runtime_log("model-doc: clear begin");
+    ModelDocument empty_model;
+    std::vector<Image> empty_textures;
+    std::string ignored_error;
+    if (ensure_gl_context_current()) {
+        (void)model_renderer_.upload_model(empty_model, empty_textures, ignored_error);
+        if (!ignored_error.empty()) {
+            append_runtime_log(std::string("model-doc: clear upload_model reported: ") + ignored_error);
+        }
+    }
+
+    for (Texture& texture : model_original_textures_) {
+        destroy_texture(texture);
+    }
+    model_original_textures_.clear();
+    model_processed_textures_.clear();
+    model_ = {};
+    pending_model_texture_exports_.clear();
+    model_preview_log_frames_ = 0;
+    append_runtime_log("model-doc: clear complete");
+}
+
+void App::reset_model_camera()
+{
+    model_yaw_ = 0.65F;
+    model_pitch_ = 0.35F;
+    model_distance_ = 2.8F;
+    model_target_offset_x_ = 0.0F;
+    model_target_offset_y_ = 0.0F;
+    model_target_offset_z_ = 0.0F;
+}
+
+void App::reset_model_camera_to_origin()
+{
+    model_yaw_ = 0.65F;
+    model_pitch_ = 0.35F;
+    model_distance_ = 2.8F;
+    model_target_offset_x_ = -model_.center[0];
+    model_target_offset_y_ = -model_.center[1];
+    model_target_offset_z_ = -model_.center[2];
+}
+
+void App::pan_model_camera(float delta_x, float delta_y)
+{
+    if (delta_x == 0.0F && delta_y == 0.0F) {
+        return;
+    }
+
+    CameraVector right;
+    CameraVector up;
+    CameraVector forward;
+    model_camera_basis(model_yaw_, model_pitch_, right, up, forward);
+
+    const float radius = std::max(model_.radius, 0.1F);
+    const float scale = radius * std::max(model_distance_, 0.8F) * 0.0015F;
+    model_target_offset_x_ += (-right.x * delta_x + up.x * delta_y) * scale;
+    model_target_offset_y_ += (-right.y * delta_x + up.y * delta_y) * scale;
+    model_target_offset_z_ += (-right.z * delta_x + up.z * delta_y) * scale;
+}
+
+std::vector<App::ModelMaterialSlot> App::model_material_slots() const
+{
+    std::vector<ModelMaterialSlot> slots;
+    for (const ModelPrimitive& primitive : model_.primitives) {
+        auto found = std::find_if(slots.begin(), slots.end(), [&](const ModelMaterialSlot& slot) {
+            if (primitive.material_index >= 0) {
+                return slot.material_index == primitive.material_index;
+            }
+            return slot.material_index < 0 && slot.mesh_index == primitive.mesh_index;
+        });
+
+        if (found == slots.end()) {
+            ModelMaterialSlot slot;
+            slot.mesh_index = primitive.mesh_index;
+            slot.material_index = primitive.material_index;
+            slot.texture_index = primitive.texture_index;
+            slot.primitive_count = 1U;
+            slot.mesh_name = primitive.mesh_name;
+            slot.material_name = primitive.material_name;
+            slots.push_back(std::move(slot));
+            continue;
+        }
+
+        found->primitive_count += 1U;
+        if (found->texture_index != primitive.texture_index) {
+            found->texture_index = -1;
+        }
+        if (found->mesh_name.empty()) {
+            found->mesh_name = primitive.mesh_name;
+        }
+        if (found->material_name.empty()) {
+            found->material_name = primitive.material_name;
+        }
+    }
+    return slots;
+}
+
+std::string App::model_texture_display_name(std::size_t texture_index) const
+{
+    if (texture_index >= model_.textures.size()) {
+        return text(TextId::UntexturedGrey);
+    }
+
+    const ModelTexture& texture = model_.textures[texture_index];
+    if (!texture.name.empty()) {
+        return texture.name;
+    }
+    return default_model_texture_export_name(texture, texture_index);
+}
+
 void App::refresh_palettes()
 {
     palettes_ = load_saved_palettes();
@@ -2219,6 +3279,20 @@ void App::mark_dirty()
 void App::set_status(std::string message)
 {
     status_ = std::move(message);
+}
+
+bool App::ensure_gl_context_current()
+{
+    if (!window_ || !gl_context_) {
+        append_runtime_log("gl: cannot make context current because window/context is null");
+        return false;
+    }
+    if (!SDL_GL_MakeCurrent(window_, gl_context_)) {
+        append_runtime_log(std::string("gl: SDL_GL_MakeCurrent failed: ") + SDL_GetError());
+        set_status(textf(TextId::StatusRendererSetupFailedFormat, {{"error", SDL_GetError()}}));
+        return false;
+    }
+    return true;
 }
 
 const char* App::text(TextId id) const
@@ -2245,6 +3319,7 @@ FileDialogLabels App::file_dialog_labels() const
 {
     return {
         text(TextId::ImagesFilter),
+        text(TextId::ModelsFilter),
         text(TextId::AllFilesFilter),
         text(TextId::LospecPalettesFilter),
         text(TextId::PngImageFilter),

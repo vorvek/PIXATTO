@@ -21,11 +21,18 @@ bool has_extension(const std::filesystem::path& path, const char* extension)
     return actual == extension;
 }
 
+bool is_model_path(const std::filesystem::path& path)
+{
+    return has_extension(path, ".glb") || has_extension(path, ".gltf") || has_extension(path, ".obj");
+}
+
 struct PendingDialog {
     FileCommandKind kind = FileCommandKind::OpenImage;
     std::filesystem::path path;
     bool failed = false;
+    bool canceled = false;
     std::string error;
+    int index = -1;
 };
 
 } // namespace
@@ -47,6 +54,9 @@ struct DialogPayload {
     std::vector<std::string> filter_names;
     std::vector<std::string> filter_patterns;
     std::vector<SDL_DialogFileFilter> filters;
+    std::filesystem::path default_path;
+    std::string default_location;
+    int index = -1;
 };
 
 void SDLCALL dialog_callback(void* userdata, const char* const* filelist, int)
@@ -58,6 +68,7 @@ void SDLCALL dialog_callback(void* userdata, const char* const* filelist, int)
 
     PendingDialog dialog;
     dialog.kind = payload->kind;
+    dialog.index = payload->index;
     if (!filelist) {
         dialog.failed = true;
         if (const char* error = SDL_GetError(); error && *error != '\0') {
@@ -65,6 +76,8 @@ void SDLCALL dialog_callback(void* userdata, const char* const* filelist, int)
         }
     } else if (filelist[0]) {
         dialog.path = filelist[0];
+    } else {
+        dialog.canceled = true;
     }
 
     std::lock_guard<std::mutex> lock(payload->state->mutex);
@@ -75,13 +88,18 @@ std::unique_ptr<DialogPayload> make_payload(
     std::shared_ptr<detail::FileCommandPumpDialogState> state,
     FileCommandKind command,
     std::vector<std::string> filter_names,
-    std::vector<std::string> filter_patterns)
+    std::vector<std::string> filter_patterns,
+    std::filesystem::path default_path,
+    int index)
 {
     auto payload = std::make_unique<DialogPayload>();
     payload->state = std::move(state);
     payload->kind = command;
     payload->filter_names = std::move(filter_names);
     payload->filter_patterns = std::move(filter_patterns);
+    payload->default_path = std::move(default_path);
+    payload->default_location = payload->default_path.string();
+    payload->index = index;
     payload->filters.reserve(payload->filter_names.size());
 
     for (std::size_t index = 0; index < payload->filter_names.size(); ++index) {
@@ -118,6 +136,16 @@ bool FileCommandPump::request_open_image_dialog(SDL_Window* window, const FileDi
         false);
 }
 
+bool FileCommandPump::request_open_model_dialog(SDL_Window* window, const FileDialogLabels& labels)
+{
+    return request_dialog(
+        window,
+        FileCommandKind::OpenModel,
+        {labels.models_filter, labels.all_files_filter},
+        {"glb;gltf;obj", "*"},
+        false);
+}
+
 bool FileCommandPump::request_import_palette_dialog(SDL_Window* window, const FileDialogLabels& labels)
 {
     return request_dialog(
@@ -138,6 +166,22 @@ bool FileCommandPump::request_export_png_dialog(SDL_Window* window, const FileDi
         true);
 }
 
+bool FileCommandPump::request_export_model_texture_png_dialog(
+    SDL_Window* window,
+    const FileDialogLabels& labels,
+    const std::filesystem::path& default_path,
+    int texture_index)
+{
+    return request_dialog(
+        window,
+        FileCommandKind::ExportModelTexturePng,
+        {labels.png_image_filter},
+        {"png"},
+        true,
+        default_path,
+        texture_index);
+}
+
 bool FileCommandPump::request_export_raw_dialog(SDL_Window* window, const FileDialogLabels& labels)
 {
     return request_dialog(
@@ -148,7 +192,7 @@ bool FileCommandPump::request_export_raw_dialog(SDL_Window* window, const FileDi
         true);
 }
 
-void FileCommandPump::submit_drop(std::filesystem::path path, bool has_open_image)
+void FileCommandPump::submit_drop(std::filesystem::path path, bool has_open_document)
 {
     if (path.empty()) {
         return;
@@ -159,7 +203,12 @@ void FileCommandPump::submit_drop(std::filesystem::path path, bool has_open_imag
         return;
     }
 
-    if (has_open_image) {
+    if (is_model_path(path)) {
+        queued_commands_.push_back({has_open_document ? FileCommandKind::ConfirmOpenImage : FileCommandKind::OpenModel, std::move(path), {}});
+        return;
+    }
+
+    if (has_open_document) {
         queued_commands_.push_back({FileCommandKind::ConfirmOpenImage, std::move(path), {}});
         return;
     }
@@ -178,13 +227,17 @@ std::vector<FileCommand> FileCommandPump::drain_commands()
     for (const PendingDialog& dialog : dialogs) {
         dialog_open_ = false;
         if (dialog.failed) {
-            queued_commands_.push_back({FileCommandKind::DialogFailed, {}, dialog.error});
+            queued_commands_.push_back({FileCommandKind::DialogFailed, {}, dialog.error, dialog.index});
+            continue;
+        }
+        if (dialog.canceled) {
+            queued_commands_.push_back({FileCommandKind::DialogCanceled, {}, {}, dialog.index});
             continue;
         }
         if (dialog.path.empty()) {
             continue;
         }
-        queued_commands_.push_back({dialog.kind, dialog.path, {}});
+        queued_commands_.push_back({dialog.kind, dialog.path, {}, dialog.index});
     }
 
     std::vector<FileCommand> commands;
@@ -197,15 +250,24 @@ bool FileCommandPump::request_dialog(
     FileCommandKind command,
     std::vector<std::string> filter_names,
     std::vector<std::string> filter_patterns,
-    bool save_dialog)
+    bool save_dialog,
+    std::filesystem::path default_path,
+    int index)
 {
     if (dialog_open_ || filter_names.size() != filter_patterns.size()) {
         return false;
     }
 
     dialog_open_ = true;
-    auto payload = make_payload(dialog_state_, command, std::move(filter_names), std::move(filter_patterns));
+    auto payload = make_payload(
+        dialog_state_,
+        command,
+        std::move(filter_names),
+        std::move(filter_patterns),
+        std::move(default_path),
+        index);
     auto* raw_payload = payload.release();
+    const char* default_location_ptr = raw_payload->default_location.empty() ? nullptr : raw_payload->default_location.c_str();
     if (save_dialog) {
         SDL_ShowSaveFileDialog(
             dialog_callback,
@@ -213,7 +275,7 @@ bool FileCommandPump::request_dialog(
             window,
             raw_payload->filters.data(),
             static_cast<int>(raw_payload->filters.size()),
-            nullptr);
+            default_location_ptr);
     } else {
         SDL_ShowOpenFileDialog(
             dialog_callback,
@@ -221,7 +283,7 @@ bool FileCommandPump::request_dialog(
             window,
             raw_payload->filters.data(),
             static_cast<int>(raw_payload->filters.size()),
-            nullptr,
+            default_location_ptr,
             false);
     }
     return true;

@@ -5,6 +5,8 @@ Pixelizer fetches these dependencies at configure time and links them into the d
 - SDL3 `release-3.4.4` from `libsdl-org/SDL`, under the zlib license.
 - Dear ImGui `v1.92.7` from `ocornut/imgui`, under the MIT license.
 - stb at commit `31c1ad37456438565541f4919958214b6e762fb4` from `nothings/stb`, using its public-domain/MIT dual license.
+- tinygltf `v2.9.7` from `syoyo/tinygltf`, under the MIT license.
+- tinyobjloader `v2.0.0rc13` from `tinyobjloader/tinyobjloader`, under the MIT license.
 
 Pixelizer bundles these default palette files from Lospec. Links point to the original palette pages:
 
