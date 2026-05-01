@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.1 - 2026-05-02
+
+- Added a `Close File` control to the result/model preview header so the current image or model can be closed without changing processing settings.
+- Closing a model now returns PIXATTO to image mode, letting subsequent image imports and drops start normal image work instead of adding textures to the model drawer.
+
 ## 1.7.0 - 2026-05-01
 
 - Renamed the application from Pixelizer to PIXATTO across the app title, release packages, documentation, source namespace, headers, and build targets.
