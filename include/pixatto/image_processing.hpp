@@ -55,7 +55,7 @@ struct Adjustments {
 };
 
 struct ProcessSettings {
-    int pixel_size = 8;
+    int pixel_size = 2;
     BlockColorMode block_color_mode = BlockColorMode::WeightedAverage;
     bool use_palette = false;
     bool preserve_transparency = false;
@@ -74,5 +74,6 @@ struct ProcessSettings {
 };
 
 Image process_image(const Image& source, const ProcessSettings& settings);
+Image collapse_pixel_blocks(const Image& image, int pixel_size);
 
 } // namespace pixatto

@@ -72,6 +72,7 @@ The in-app help button next to the language selector lists the active controls. 
 - In model mode, it exports the processed model textures only, prompting once per affected texture.
 
 PNG export writes indexed 8-bit PNGs when the result fits in 256 palette entries, and truecolor PNGs otherwise.
+Exported image dimensions use one output pixel per pixelization block, so a source image becomes `ceil(width / Pixel Size)` by `ceil(height / Pixel Size)`.
 
 `Export... > Export Raw` is available for images. It writes an 8-bit indexed `.raw` file, a shared `.pal` palette sidecar, and an optional `.msk` transparency mask.
 
@@ -118,7 +119,7 @@ cmake --build --preset ninja-release
 
 ## Raw Export Format
 
-Raw export writes a headerless 8-bit indexed image plus sidecar files:
+Raw export writes a headerless 8-bit indexed image plus sidecar files. Its width and height are the exported pixel-block dimensions from the current Pixel Size setting.
 
 - `<image>.raw` contains exactly `width * height` bytes in row-major order, left-to-right and top-to-bottom. Each byte is a palette index from `0` to `255`.
 - `<palette>.pal` contains the shared palette. If a saved palette is active, the sidecar is named from that palette, so multiple raw images can share one palette file. If there is no saved active palette, it uses the exported image stem. The file is ASCII text with one uppercase `RRGGBB` color per line; the line number is the palette index.

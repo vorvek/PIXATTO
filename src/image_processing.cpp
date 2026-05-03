@@ -1831,4 +1831,37 @@ Image process_image(const Image& source, const ProcessSettings& settings)
     return result;
 }
 
+Image collapse_pixel_blocks(const Image& image, int pixel_size)
+{
+    if (!has_valid_rgba_size(image)) {
+        return {};
+    }
+
+    const int block_size = std::clamp(pixel_size, 1, 256);
+    if (block_size == 1) {
+        return image;
+    }
+
+    Image result;
+    result.width = (image.width - 1) / block_size + 1;
+    result.height = (image.height - 1) / block_size + 1;
+    result.rgba.resize(static_cast<std::size_t>(result.width) * static_cast<std::size_t>(result.height) * 4U);
+
+    for (int y = 0; y < result.height; ++y) {
+        for (int x = 0; x < result.width; ++x) {
+            const std::uint8_t* source_pixel = image.rgba.data()
+                + (static_cast<std::size_t>(y * block_size) * static_cast<std::size_t>(image.width)
+                   + static_cast<std::size_t>(x * block_size)) * 4U;
+            std::uint8_t* result_pixel = result.rgba.data()
+                + (static_cast<std::size_t>(y) * static_cast<std::size_t>(result.width) + static_cast<std::size_t>(x)) * 4U;
+            result_pixel[0U] = source_pixel[0U];
+            result_pixel[1U] = source_pixel[1U];
+            result_pixel[2U] = source_pixel[2U];
+            result_pixel[3U] = source_pixel[3U];
+        }
+    }
+
+    return result;
+}
+
 } // namespace pixatto

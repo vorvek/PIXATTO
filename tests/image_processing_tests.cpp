@@ -112,6 +112,45 @@ void pixel_size_one_writes_each_source_pixel()
     require(result.rgba == expected);
 }
 
+void collapsed_pixel_blocks_use_one_pixel_per_block()
+{
+    const pixatto::Image image = {
+        5,
+        3,
+        {
+            255, 0, 0, 255,
+            255, 0, 0, 255,
+            0, 255, 0, 255,
+            0, 255, 0, 255,
+            0, 0, 255, 255,
+            255, 0, 0, 255,
+            255, 0, 0, 255,
+            0, 255, 0, 255,
+            0, 255, 0, 255,
+            0, 0, 255, 255,
+            255, 255, 0, 255,
+            255, 255, 0, 255,
+            255, 0, 255, 255,
+            255, 0, 255, 255,
+            0, 255, 255, 255,
+        },
+    };
+
+    const pixatto::Image result = pixatto::collapse_pixel_blocks(image, 2);
+    const std::vector<unsigned char> expected = {
+        255, 0, 0, 255,
+        0, 255, 0, 255,
+        0, 0, 255, 255,
+        255, 255, 0, 255,
+        255, 0, 255, 255,
+        0, 255, 255, 255,
+    };
+
+    require(result.width == 3);
+    require(result.height == 2);
+    require(result.rgba == expected);
+}
+
 void paletted_riemersma_outputs_palette_colors()
 {
     const pixatto::Image source = {
@@ -228,6 +267,7 @@ int main()
 {
     one_pixel_fast_path_matches_one_pixel_block_path();
     pixel_size_one_writes_each_source_pixel();
+    collapsed_pixel_blocks_use_one_pixel_per_block();
     paletted_riemersma_outputs_palette_colors();
     added_dither_modes_create_two_tone_patterns();
     return 0;

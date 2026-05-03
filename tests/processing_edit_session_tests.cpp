@@ -34,7 +34,7 @@ void continuous_edit_commits_one_undo_step()
     require(session.preview_dirty());
 
     require(session.undo(0));
-    require(session.settings().pixel_size == 8);
+    require(session.settings().pixel_size == 2);
 }
 
 void repeated_live_edits_keep_preview_dirty()

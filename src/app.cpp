@@ -3795,7 +3795,8 @@ void App::export_result_to_png_path(const std::filesystem::path& path)
 
     std::string error;
     const std::string destination = ensure_extension(path, ".png");
-    if (!save_png_rgba(destination, result_, error)) {
+    const Image export_image = collapse_pixel_blocks(result_, edit_session_.settings().pixel_size);
+    if (!save_png_rgba(destination, export_image, error)) {
         set_status(textf(TextId::StatusExportFailedFormat, {{"error", error}}));
         return;
     }
@@ -3813,7 +3814,10 @@ void App::export_model_texture_to_png_path(std::size_t texture_index, const std:
 
     std::string error;
     const std::string destination = ensure_extension(path, ".png");
-    if (!save_png_rgba(destination, model_processed_textures_[texture_index], error)) {
+    const Image export_image = collapse_pixel_blocks(
+        model_processed_textures_[texture_index],
+        edit_session_.settings().pixel_size);
+    if (!save_png_rgba(destination, export_image, error)) {
         set_status(textf(TextId::StatusExportFailedFormat, {{"error", error}}));
         return;
     }
@@ -3842,7 +3846,8 @@ void App::export_result_to_raw_path(const std::filesystem::path& path)
 
     std::string error;
     const std::string destination = ensure_extension(path, ".raw");
-    if (!save_raw_indexed(destination, result_, preferred_palette, palette_name, error)) {
+    const Image export_image = collapse_pixel_blocks(result_, settings.pixel_size);
+    if (!save_raw_indexed(destination, export_image, preferred_palette, palette_name, error)) {
         set_status(textf(TextId::StatusExportFailedFormat, {{"error", error}}));
         return;
     }
@@ -3970,6 +3975,7 @@ void App::process_next_batch_image()
         }
 
         const Image processed = process_image(loaded.image, settings);
+        const Image export_image = collapse_pixel_blocks(processed, settings.pixel_size);
         const char* extension = batch_->format == BatchExportFormat::Png ? ".png" : ".raw";
         const std::filesystem::path destination = batch_output_path(
             batch_->output_dir,
@@ -3977,11 +3983,11 @@ void App::process_next_batch_image()
             batch_->suffix.data(),
             extension);
         if (batch_->format == BatchExportFormat::Png) {
-            exported = save_png_rgba(destination.string(), processed, error);
+            exported = save_png_rgba(destination.string(), export_image, error);
         } else {
             const std::vector<Color32> empty_palette;
             const std::vector<Color32>& preferred_palette = settings.use_palette ? settings.palette : empty_palette;
-            exported = save_raw_indexed(destination.string(), processed, preferred_palette, palette_name, error);
+            exported = save_raw_indexed(destination.string(), export_image, preferred_palette, palette_name, error);
         }
 
         if (exported) {

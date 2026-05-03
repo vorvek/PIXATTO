@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.2 - 2026-05-03
+
+- Changed the default pixel size from `8` to `2`.
+- Changed PNG, raw, batch, and model texture exports to write one output pixel per pixelization block, reducing exported dimensions to `ceil(width / Pixel Size)` by `ceil(height / Pixel Size)`.
+
 ## 1.7.1 - 2026-05-02
 
 - Added a `Close File` control to the result/model preview header so the current image or model can be closed without changing processing settings.
