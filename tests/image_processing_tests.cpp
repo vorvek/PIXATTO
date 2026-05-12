@@ -1,6 +1,11 @@
 #include "pixatto/image_processing.hpp"
+#include "pixatto/gpu_image_processor.hpp"
+
+#include <SDL3/SDL.h>
 
 #include <stdexcept>
+#include <iostream>
+#include <string>
 #include <vector>
 
 namespace {
@@ -318,6 +323,175 @@ void collapsed_processing_matches_full_processing_sampled()
     }
 }
 
+void sampled_collapsed_processing_is_the_low_quality_path()
+{
+    pixatto::Image source;
+    source.width = 2;
+    source.height = 2;
+    source.rgba = {
+        0, 0, 0, 255,
+        255, 255, 255, 255,
+        255, 255, 255, 255,
+        255, 255, 255, 255,
+    };
+
+    pixatto::ProcessSettings settings;
+    settings.pixel_size = 2;
+    require(pixatto::supports_low_quality_process(settings));
+
+    const pixatto::Image exact = pixatto::process_image_collapsed(source, settings);
+    const pixatto::Image sampled = pixatto::process_image_sampled_collapsed(source, settings);
+    require(exact.width == 1 && exact.height == 1);
+    require(sampled.width == 1 && sampled.height == 1);
+    require(exact.rgba != sampled.rgba);
+
+    settings.dither_mode = pixatto::DitherMode::Atkinson;
+    settings.dither_amount = 1.0F;
+    require(!pixatto::supports_low_quality_process(settings));
+    require_same_image(pixatto::process_image_collapsed(source, settings), pixatto::process_image_sampled_collapsed(source, settings));
+}
+
+void gpu_sampled_processor_capability_matches_shader_scope()
+{
+    pixatto::ProcessSettings settings;
+    settings.dither_mode = pixatto::DitherMode::Bayer;
+    settings.dither_amount = 0.5F;
+    require(pixatto::can_process_sampled_collapsed_on_gpu(settings));
+
+    settings.dither_mode = pixatto::DitherMode::BlueNoise;
+    require(!pixatto::can_process_sampled_collapsed_on_gpu(settings));
+
+    settings.dither_amount = 0.0F;
+    require(pixatto::can_process_sampled_collapsed_on_gpu(settings));
+
+    settings.use_palette = true;
+    settings.palette = {{0, 0, 0, 255}, {255, 255, 255, 255}};
+    require(!pixatto::can_process_sampled_collapsed_on_gpu(settings));
+
+    settings.use_palette = false;
+    settings.reduction_max_colors = 4;
+    require(!pixatto::can_process_sampled_collapsed_on_gpu(settings));
+}
+
+void gpu_sampled_processor_matches_cpu_when_context_is_available()
+{
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        return;
+    }
+
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+    SDL_Window* window = SDL_CreateWindow("gpu-test", 1, 1, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
+    if (!window) {
+        SDL_Quit();
+        return;
+    }
+    SDL_GLContext context = SDL_GL_CreateContext(window);
+    if (!context) {
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return;
+    }
+    if (!SDL_GL_MakeCurrent(window, context)) {
+        SDL_GL_DestroyContext(context);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return;
+    }
+
+    auto require_gpu_matches_cpu = [](pixatto::GpuImageProcessor& processor, const pixatto::Image& source, const pixatto::ProcessSettings& settings) {
+        pixatto::Image gpu_result;
+        std::string error;
+        if (!processor.process_sampled_collapsed(source, settings, gpu_result, error)) {
+            std::cerr << "gpu error: " << error << "\n";
+            require(false);
+        }
+        const pixatto::Image cpu_result = pixatto::process_image_sampled_collapsed(source, settings);
+        if (cpu_result.rgba != gpu_result.rgba) {
+            std::cerr << "cpu:";
+            for (unsigned char value : cpu_result.rgba) {
+                std::cerr << " " << static_cast<int>(value);
+            }
+            std::cerr << "\ngpu:";
+            for (unsigned char value : gpu_result.rgba) {
+                std::cerr << " " << static_cast<int>(value);
+            }
+            std::cerr << "\n";
+        }
+        require_same_image(cpu_result, gpu_result);
+    };
+
+    {
+        pixatto::GpuImageProcessor processor;
+
+        {
+            pixatto::Image source;
+            source.width = 4;
+            source.height = 4;
+            source.rgba = {
+                0, 0, 0, 0,
+                0, 0, 0, 255,
+                255, 0, 0, 255,
+                0, 0, 0, 255,
+                0, 0, 0, 255,
+                0, 0, 0, 255,
+                0, 0, 0, 255,
+                0, 0, 0, 255,
+                0, 255, 0, 255,
+                0, 0, 0, 255,
+                0, 0, 255, 255,
+                0, 0, 0, 255,
+                0, 0, 0, 255,
+                0, 0, 0, 255,
+                0, 0, 0, 255,
+                0, 0, 0, 255,
+            };
+
+            pixatto::ProcessSettings settings;
+            settings.pixel_size = 2;
+            settings.color_levels = 8;
+
+            require_gpu_matches_cpu(processor, source, settings);
+        }
+
+        {
+            pixatto::Image source;
+            source.width = 5;
+            source.height = 3;
+            source.rgba = {
+                12, 36, 72, 255,
+                36, 72, 108, 255,
+                72, 108, 144, 255,
+                108, 144, 180, 255,
+                144, 180, 216, 255,
+                24, 48, 96, 255,
+                48, 96, 128, 255,
+                96, 128, 160, 255,
+                128, 160, 192, 255,
+                160, 192, 224, 255,
+                0, 0, 0, 0,
+                60, 90, 120, 255,
+                90, 120, 150, 255,
+                120, 150, 180, 255,
+                150, 180, 210, 255,
+            };
+
+            pixatto::ProcessSettings settings;
+            settings.pixel_size = 2;
+            settings.color_levels = 4;
+            settings.dither_mode = pixatto::DitherMode::Bayer;
+            settings.dither_amount = 0.5F;
+            settings.bayer_matrix_size = 4;
+
+            require_gpu_matches_cpu(processor, source, settings);
+        }
+    }
+
+    SDL_GL_DestroyContext(context);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+}
+
 } // namespace
 
 int main()
@@ -328,5 +502,8 @@ int main()
     paletted_riemersma_outputs_palette_colors();
     added_dither_modes_create_two_tone_patterns();
     collapsed_processing_matches_full_processing_sampled();
+    sampled_collapsed_processing_is_the_low_quality_path();
+    gpu_sampled_processor_capability_matches_shader_scope();
+    gpu_sampled_processor_matches_cpu_when_context_is_available();
     return 0;
 }

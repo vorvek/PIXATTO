@@ -770,6 +770,43 @@ bool is_error_diffusion_mode(DitherMode mode)
     return false;
 }
 
+bool supports_low_quality_process_impl(const ProcessSettings& settings)
+{
+    if (settings.dither_amount <= 0.0F || settings.dither_mode == DitherMode::None) {
+        return true;
+    }
+
+    switch (settings.dither_mode) {
+    case DitherMode::Bayer:
+        return true;
+    case DitherMode::None:
+    case DitherMode::BlueNoise:
+    case DitherMode::FloydSteinberg:
+    case DitherMode::FalseFloydSteinberg:
+    case DitherMode::FilterLite:
+    case DitherMode::ZhigangFan:
+    case DitherMode::ShiauFan:
+    case DitherMode::JarvisJudiceNinke:
+    case DitherMode::Atkinson:
+    case DitherMode::Stucki:
+    case DitherMode::Burkes:
+    case DitherMode::Sierra:
+    case DitherMode::TwoRowSierra:
+    case DitherMode::Riemersma:
+    case DitherMode::ClusterDot4x4:
+    case DitherMode::ClusterDot8x8:
+    case DitherMode::Horizontal2x2:
+    case DitherMode::Horizontal8x1:
+    case DitherMode::Horizontal12x4:
+    case DitherMode::Vertical2x2:
+    case DitherMode::Vertical1x8:
+    case DitherMode::Vertical4x12:
+    case DitherMode::Diagonal5x5:
+        return false;
+    }
+    return false;
+}
+
 const OrderedDitherMap* ordered_dither_map(DitherMode mode)
 {
     static constexpr std::array<int, 16> cluster_dot_4x4 = {
@@ -1895,6 +1932,11 @@ void write_riemersma_collapsed(
 
 } // namespace
 
+bool supports_low_quality_process(const ProcessSettings& settings)
+{
+    return supports_low_quality_process_impl(settings);
+}
+
 Image process_image(const Image& source, const ProcessSettings& settings)
 {
     if (!has_valid_rgba_size(source)) {
@@ -2067,6 +2109,75 @@ Image process_image_collapsed(const Image& source, const ProcessSettings& settin
             + static_cast<std::size_t>(by) * static_cast<std::size_t>(result.width) * 4U;
         for (int bx = 0; bx < blocks_x; ++bx) {
             const BlockColor& block = blocks[static_cast<std::size_t>(by) * static_cast<std::size_t>(blocks_x) + static_cast<std::size_t>(bx)];
+            const Vec3 dithered = apply_dither(block.srgb, bx, by, settings);
+            const Color32 final_color = quantize_color(dithered, block.alpha, palette, settings);
+            write_pixel(result_pixel, final_color);
+            result_pixel += 4U;
+        }
+    }
+
+    return result;
+}
+
+Image process_image_sampled_collapsed(const Image& source, const ProcessSettings& settings)
+{
+    if (!has_valid_rgba_size(source)) {
+        return {};
+    }
+    if (!supports_low_quality_process_impl(settings)) {
+        return process_image_collapsed(source, settings);
+    }
+
+    const int pixel_size = std::clamp(settings.pixel_size, 1, 256);
+    const int blocks_x = (source.width + pixel_size - 1) / pixel_size;
+    const int blocks_y = (source.height + pixel_size - 1) / pixel_size;
+
+    Image result;
+    result.width = blocks_x;
+    result.height = blocks_y;
+    result.rgba.resize(static_cast<std::size_t>(blocks_x) * static_cast<std::size_t>(blocks_y) * 4U);
+
+    const AdjustmentContext adjustment_context = build_adjustment_context(settings.adjustments);
+
+    std::vector<BlockColor> sampled_blocks;
+    if (!settings.use_palette && settings.reduction_max_colors > 0) {
+        sampled_blocks.reserve(static_cast<std::size_t>(blocks_x) * static_cast<std::size_t>(blocks_y));
+    }
+
+    auto source_pixel_for_block = [&](int bx, int by) {
+        const int start_x = bx * pixel_size;
+        const int start_y = by * pixel_size;
+        const int end_x = std::min(start_x + pixel_size, source.width);
+        const int end_y = std::min(start_y + pixel_size, source.height);
+        const int sample_x = start_x + (end_x - start_x - 1) / 2;
+        const int sample_y = start_y + (end_y - start_y - 1) / 2;
+        return source.rgba.data()
+            + (static_cast<std::size_t>(sample_y) * static_cast<std::size_t>(source.width)
+               + static_cast<std::size_t>(sample_x)) * 4U;
+    };
+
+    if (!settings.use_palette && settings.reduction_max_colors > 0) {
+        for (int by = 0; by < blocks_y; ++by) {
+            for (int bx = 0; bx < blocks_x; ++bx) {
+                sampled_blocks.push_back(choose_single_pixel_color(source_pixel_for_block(bx, by), adjustment_context));
+            }
+        }
+    }
+
+    const std::vector<Color32> generated_palette = (!settings.use_palette && settings.reduction_max_colors > 0)
+        ? generate_reduced_palette(sampled_blocks, settings.reduction_max_colors, settings)
+        : std::vector<Color32>{};
+    const std::vector<Color32>& active_palette = settings.use_palette ? settings.palette : generated_palette;
+    const PaletteMatcher palette = build_palette_matcher(active_palette, false);
+
+    std::size_t sampled_index = 0;
+    for (int by = 0; by < blocks_y; ++by) {
+        std::uint8_t* result_pixel = result.rgba.data()
+            + static_cast<std::size_t>(by) * static_cast<std::size_t>(result.width) * 4U;
+        for (int bx = 0; bx < blocks_x; ++bx) {
+            const BlockColor block = !sampled_blocks.empty()
+                ? sampled_blocks[sampled_index++]
+                : choose_single_pixel_color(source_pixel_for_block(bx, by), adjustment_context);
             const Vec3 dithered = apply_dither(block.srgb, bx, by, settings);
             const Color32 final_color = quantize_color(dithered, block.alpha, palette, settings);
             write_pixel(result_pixel, final_color);

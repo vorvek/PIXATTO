@@ -50,12 +50,13 @@ Scrubbed and paused frames are decoded, processed with the current settings, col
 
 On Windows, timeline playback uses Media Foundation for native preview decoding instead of launching FFmpeg for every displayed frame. Linux and macOS native playback backends are planned; until then, unsupported preview decode falls back to still-frame updates.
 
-Available export profiles depend on the detected FFmpeg build:
+Available export choices depend on the detected FFmpeg build. Video codec, audio handling, and container are selected separately:
 
-- Software: MP4/H.264, MP4/H.265, WebM/VP9, MKV/AV1, and MKV/FFV1 lossless when the matching encoders and muxers are available.
-- Hardware: NVIDIA NVENC and AMD AMF H.264/H.265/AV1 profiles when those FFmpeg encoders are present.
+- Video codecs: H.264, H.265, AV1, VP9, and detected NVIDIA NVENC, AMD AMF, or Intel QSV variants.
+- Audio: copy compatible source audio, encode AAC, encode Vorbis, or omit audio.
+- Containers: MP4 for H.264/H.265/AV1, WebM for VP9, and MKV for any supported combination.
 
-Hardware profiles expose speed presets and bitrate controls. They are intended for faster exports and may need a higher bitrate for similar quality.
+Hardware encoders expose speed presets and QP quality controls, with lower QP values targeting higher visual quality.
 
 ## 3D Model Texture Workflow
 
@@ -98,7 +99,7 @@ Exported image dimensions use one output pixel per pixelization block, so a sour
 
 `Export... > Export Raw` is available for images. It writes an 8-bit indexed `.raw` file, a shared `.pal` palette sidecar, and an optional `.msk` transparency mask.
 
-`Export... > Export Video` is available in video mode. It writes constant-frame-rate output using the probed average FPS, copies the first compatible audio stream by default, and omits audio with a warning when the selected container cannot copy the source codec. Profiles that require even dimensions pad odd processed output sizes before encoding.
+`Export... > Export Video` is available in video mode. It writes constant-frame-rate output using the probed average FPS, and combinations that require even dimensions pad odd processed output sizes before encoding.
 
 ## Downloads
 

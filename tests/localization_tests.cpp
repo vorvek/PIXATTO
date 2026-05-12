@@ -79,6 +79,54 @@ void preset_management_text_is_localized_for_every_language()
     }
 }
 
+void video_export_modal_text_is_localized_for_every_language()
+{
+    constexpr std::array video_export_text = {
+        pixatto::TextId::ExportVideo,
+        pixatto::TextId::VideoExportWindowTitle,
+        pixatto::TextId::VideoCodec,
+        pixatto::TextId::VideoContainer,
+        pixatto::TextId::VideoAudio,
+        pixatto::TextId::VideoNoAudio,
+        pixatto::TextId::VideoAudioCopy,
+        pixatto::TextId::VideoAudioAac,
+        pixatto::TextId::VideoAudioVorbis,
+        pixatto::TextId::VideoQualityCrf,
+        pixatto::TextId::VideoQualityQp,
+        pixatto::TextId::VideoHardwareSpeed,
+        pixatto::TextId::VideoHardwareSpeedBalanced,
+        pixatto::TextId::VideoHardwareSpeedFast,
+        pixatto::TextId::VideoHardwareSpeedVeryFast,
+        pixatto::TextId::VideoHardwareHint,
+        pixatto::TextId::VideoHardwareProbeRunning,
+        pixatto::TextId::VideoHighQualityProcess,
+        pixatto::TextId::VideoHighQualityProcessHint,
+        pixatto::TextId::VideoCpuRequiredProcessHint,
+        pixatto::TextId::VideoAudioIncompatible,
+        pixatto::TextId::VideoOutputSizeFormat,
+        pixatto::TextId::VideoOddDimensionWarning,
+        pixatto::TextId::VideoVfrWarning,
+        pixatto::TextId::StatusVideoNoExportProfiles,
+    };
+
+    for (std::size_t language_index = 0; language_index < pixatto::kLanguageCount; ++language_index) {
+        const auto language = static_cast<pixatto::Language>(language_index);
+        for (const pixatto::TextId id : video_export_text) {
+            const std::string translated = pixatto::translate(language, id);
+            require(!translated.empty());
+            const bool stable_codec_name = id == pixatto::TextId::VideoAudio
+                || id == pixatto::TextId::VideoAudioAac
+                || id == pixatto::TextId::VideoAudioVorbis
+                || id == pixatto::TextId::VideoContainer
+                || id == pixatto::TextId::VideoQualityCrf
+                || id == pixatto::TextId::VideoQualityQp;
+            if (language != pixatto::Language::English && !stable_codec_name) {
+                require(translated != pixatto::translate(pixatto::Language::English, id));
+            }
+        }
+    }
+}
+
 } // namespace
 
 int main()
@@ -88,5 +136,6 @@ int main()
     partial_language_catalogs_fall_back_to_english();
     format_translation_replaces_placeholders_after_fallback();
     preset_management_text_is_localized_for_every_language();
+    video_export_modal_text_is_localized_for_every_language();
     return 0;
 }

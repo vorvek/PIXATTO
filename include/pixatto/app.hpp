@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pixatto/file_command_pump.hpp"
+#include "pixatto/gpu_image_processor.hpp"
 #include "pixatto/image.hpp"
 #include "pixatto/localization.hpp"
 #include "pixatto/model.hpp"
@@ -15,12 +16,14 @@
 
 #include <array>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -149,17 +152,40 @@ private:
     };
     struct VideoExportDialogState {
         int selected_profile = 0;
+        VideoContainer container = VideoContainer::Mp4;
+        VideoAudioMode audio_mode = VideoAudioMode::None;
         int crf = 18;
-        int bitrate_mbps = 24;
+        int qp = 16;
         VideoHardwareSpeed hardware_speed = VideoHardwareSpeed::Balanced;
-        bool copy_audio = true;
+        bool high_quality_process = true;
         bool request_open = false;
     };
+    struct VideoExportGpuRequest;
+    struct VideoExportGpuQueue;
     struct PendingVideoExportState {
         VideoExportSettings settings;
         std::shared_ptr<VideoExportProgress> progress;
         std::future<VideoExportResult> result;
         std::chrono::steady_clock::time_point started_at;
+        std::shared_ptr<VideoExportGpuQueue> gpu_queue;
+    };
+    struct VideoExportGpuRequest {
+        const Image* source = nullptr;
+        ProcessSettings settings;
+        Image result;
+        std::string error;
+        std::mutex mutex;
+        std::condition_variable cv;
+        VideoGpuProcessResult status = VideoGpuProcessResult::Fallback;
+        bool finished = false;
+    };
+    struct VideoExportGpuQueue {
+        std::mutex mutex;
+        std::condition_variable cv;
+        std::deque<std::shared_ptr<VideoExportGpuRequest>> requests;
+        std::string close_error;
+        VideoGpuProcessResult closed_status = VideoGpuProcessResult::Fallback;
+        bool closed = false;
     };
     struct ModelMaterialSlot {
         int mesh_index = -1;
@@ -221,6 +247,12 @@ private:
     void update_pending_video_hardware_probe();
     void update_pending_video_preview();
     void update_pending_video_export();
+    void service_video_export_gpu_queue();
+    void close_video_export_gpu_queue(
+        const std::shared_ptr<VideoExportGpuQueue>& queue,
+        VideoGpuProcessResult status,
+        std::string error);
+    void set_video_export_fast_swap(bool enabled);
     void update_preview_if_needed();
     [[nodiscard]] bool decode_video_preview_with_playback_decoder(double requested_time, double decode_time);
     void rebuild_texture(Texture& texture, const Image& image, bool nearest);
@@ -327,6 +359,8 @@ private:
     std::vector<Texture> model_original_textures_;
     std::vector<Texture> model_result_textures_;
     ModelRenderer model_renderer_;
+    std::unique_ptr<GpuImageProcessor> video_export_gpu_processor_;
+    bool video_export_fast_swap_ = false;
     VideoDocumentState video_;
     VideoPlaybackDecoder video_playback_decoder_;
 

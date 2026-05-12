@@ -255,6 +255,7 @@ pixatto_enable_release_sections(tinyxml2)
 set(PIXATTO_APP_SOURCES
     src/app.cpp
     src/file_command_pump.cpp
+    src/gpu_image_processor.cpp
     src/image_io.cpp
     src/localization.cpp
     src/main.cpp
@@ -350,6 +351,7 @@ add_test(NAME processing_edit_session COMMAND pixatto_processing_edit_session_te
 add_executable(pixatto_file_command_pump_tests
     tests/file_command_pump_tests.cpp
     src/file_command_pump.cpp
+    src/gpu_image_processor.cpp
     src/image_io.cpp
     src/image_processing.cpp
     src/video_backend.cpp
@@ -366,6 +368,7 @@ target_link_libraries(pixatto_file_command_pump_tests
     PRIVATE
         ${PIXATTO_SDL_TARGET}
         SDL3_image::SDL3_image
+        OpenGL::GL
 )
 
 if(MSVC)
@@ -378,6 +381,7 @@ add_test(NAME file_command_pump COMMAND pixatto_file_command_pump_tests)
 
 add_executable(pixatto_video_backend_tests
     tests/video_backend_tests.cpp
+    src/gpu_image_processor.cpp
     src/image_io.cpp
     src/image_processing.cpp
     src/video_backend.cpp
@@ -394,6 +398,7 @@ target_link_libraries(pixatto_video_backend_tests
     PRIVATE
         ${PIXATTO_SDL_TARGET}
         SDL3_image::SDL3_image
+        OpenGL::GL
 )
 
 if(MSVC)
@@ -406,6 +411,7 @@ add_test(NAME video_backend COMMAND pixatto_video_backend_tests)
 
 add_executable(pixatto_video_ffmpeg_integration_tests
     tests/video_ffmpeg_integration_tests.cpp
+    src/gpu_image_processor.cpp
     src/image_io.cpp
     src/image_processing.cpp
     src/video_backend.cpp
@@ -423,6 +429,7 @@ target_link_libraries(pixatto_video_ffmpeg_integration_tests
     PRIVATE
         ${PIXATTO_SDL_TARGET}
         SDL3_image::SDL3_image
+        OpenGL::GL
 )
 pixatto_link_platform_video_playback(pixatto_video_ffmpeg_integration_tests)
 
@@ -537,12 +544,19 @@ add_test(NAME presets COMMAND pixatto_preset_tests)
 
 add_executable(pixatto_image_processing_tests
     tests/image_processing_tests.cpp
+    src/gpu_image_processor.cpp
     src/image_processing.cpp
 )
 
 target_include_directories(pixatto_image_processing_tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(pixatto_image_processing_tests
+    PRIVATE
+        ${PIXATTO_SDL_TARGET}
+        OpenGL::GL
 )
 
 if(MSVC)

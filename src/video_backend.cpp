@@ -1,5 +1,7 @@
 #include "pixatto/video_backend.hpp"
 
+#include "pixatto/gpu_image_processor.hpp"
+
 #include <SDL3/SDL.h>
 
 #include <algorithm>
@@ -43,6 +45,35 @@ std::string lowercase(std::string value)
 std::string lowercase_extension(const std::filesystem::path& path)
 {
     return lowercase(path.extension().string());
+}
+
+std::string detected_container_format(const std::filesystem::path& path, std::string ffprobe_format)
+{
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        return lowercase(std::move(ffprobe_format));
+    }
+
+    std::array<char, 4096> header{};
+    input.read(header.data(), static_cast<std::streamsize>(header.size()));
+    const std::streamsize read = input.gcount();
+    if (read > 0) {
+        std::string bytes(header.data(), static_cast<std::size_t>(read));
+        bytes = lowercase(std::move(bytes));
+        if (bytes.find("webm") != std::string::npos) {
+            return "webm";
+        }
+        if (bytes.find("matroska") != std::string::npos) {
+            return "matroska";
+        }
+    }
+
+    return lowercase(std::move(ffprobe_format));
+}
+
+bool is_webm_container_format(std::string_view container_format)
+{
+    return lowercase(std::string(container_format)) == "webm";
 }
 
 bool has_token(const std::vector<std::string>& values, std::string_view token)
@@ -343,11 +374,6 @@ std::string json_string_array(const std::vector<std::string>& values)
     return output;
 }
 
-std::filesystem::path video_export_diagnostic_log_path(const VideoExportSettings& settings)
-{
-    return std::filesystem::path(ensure_extension(settings.destination_path, settings.profile.extension) + ".pixatto-export.jsonl");
-}
-
 const char* video_backend_label(VideoExportBackend backend)
 {
     switch (backend) {
@@ -380,6 +406,9 @@ struct VideoExportDiagnostics {
     std::atomic<int> queued_frames = 0;
     std::atomic<int> processing_started = 0;
     std::atomic<int> processed_frames = 0;
+    std::atomic<int> gpu_processed_frames = 0;
+    std::atomic<int> gpu_fallback_frames = 0;
+    std::atomic<int> gpu_failures = 0;
     std::atomic<int> written_frames = 0;
     std::atomic<int> read_calls = 0;
     std::atomic<int> write_calls = 0;
@@ -404,6 +433,13 @@ struct VideoExportDiagnostics {
     std::atomic<long long> write_wait_ns = 0;
 };
 
+#ifndef NDEBUG
+std::filesystem::path video_export_diagnostic_log_path(const VideoExportSettings& settings)
+{
+    return std::filesystem::path(ensure_extension(settings.destination_path, video_container_extension(settings.container)) + ".pixatto-export.jsonl");
+}
+#endif
+
 long long elapsed_ms(const VideoExportDiagnostics& diagnostics, std::chrono::steady_clock::time_point now)
 {
     return std::chrono::duration_cast<std::chrono::milliseconds>(now - diagnostics.started_at).count();
@@ -416,6 +452,9 @@ std::string diagnostic_counter_fields(const VideoExportDiagnostics& diagnostics)
            << ",\"queued_frames\":" << diagnostics.queued_frames.load()
            << ",\"processing_started\":" << diagnostics.processing_started.load()
            << ",\"processed_frames\":" << diagnostics.processed_frames.load()
+           << ",\"gpu_processed_frames\":" << diagnostics.gpu_processed_frames.load()
+           << ",\"gpu_fallback_frames\":" << diagnostics.gpu_fallback_frames.load()
+           << ",\"gpu_failures\":" << diagnostics.gpu_failures.load()
            << ",\"written_frames\":" << diagnostics.written_frames.load()
            << ",\"decoded_bytes\":" << diagnostics.decoded_bytes.load()
            << ",\"written_bytes\":" << diagnostics.written_bytes.load()
@@ -441,6 +480,7 @@ std::string diagnostic_counter_fields(const VideoExportDiagnostics& diagnostics)
     return fields.str();
 }
 
+#ifndef NDEBUG
 std::shared_ptr<VideoExportDiagnostics> open_video_export_diagnostics(const std::filesystem::path& path)
 {
     auto diagnostics = std::make_shared<VideoExportDiagnostics>();
@@ -451,6 +491,7 @@ std::shared_ptr<VideoExportDiagnostics> open_video_export_diagnostics(const std:
     }
     return diagnostics;
 }
+#endif
 
 std::vector<unsigned char> acquire_frame_buffer(
     const std::shared_ptr<VideoFrameBufferPool>& pool,
@@ -577,15 +618,29 @@ std::string qsv_preset(VideoHardwareSpeed speed)
     return "medium";
 }
 
-void append_bitrate_args(std::vector<std::string>& args, int bitrate_mbps)
+void append_hardware_qp_args(std::vector<std::string>& args, VideoExportBackend backend, int qp)
 {
-    const int bitrate = std::clamp(bitrate_mbps, 1, 500);
-    args.push_back("-b:v");
-    args.push_back(std::to_string(bitrate) + "M");
-    args.push_back("-maxrate");
-    args.push_back(std::to_string(std::max(1, bitrate * 2)) + "M");
-    args.push_back("-bufsize");
-    args.push_back(std::to_string(std::max(1, bitrate * 4)) + "M");
+    const std::string value = std::to_string(std::clamp(qp, 0, 51));
+    if (backend == VideoExportBackend::NvidiaNvenc) {
+        args.push_back("-rc");
+        args.push_back("constqp");
+        args.push_back("-qp");
+        args.push_back(value);
+    } else if (backend == VideoExportBackend::AmdAmf) {
+        args.push_back("-rc");
+        args.push_back("cqp");
+        args.push_back("-qp_i");
+        args.push_back(value);
+        args.push_back("-qp_p");
+        args.push_back(value);
+        args.push_back("-qp_b");
+        args.push_back(value);
+    } else if (backend == VideoExportBackend::IntelQsv) {
+        args.push_back("-global_quality");
+        args.push_back(value);
+        args.push_back("-b:v");
+        args.push_back("0");
+    }
 }
 
 void append_profile_video_args(std::vector<std::string>& args, const VideoExportSettings& settings)
@@ -597,73 +652,69 @@ void append_profile_video_args(std::vector<std::string>& args, const VideoExport
     if (profile.backend == VideoExportBackend::NvidiaNvenc) {
         args.push_back("-preset");
         args.push_back(nvenc_preset(settings.hardware_speed));
-        append_bitrate_args(args, settings.bitrate_mbps);
+        append_hardware_qp_args(args, profile.backend, settings.qp);
         args.push_back("-pix_fmt");
         args.push_back("yuv420p");
     } else if (profile.backend == VideoExportBackend::AmdAmf) {
         args.push_back("-quality");
         args.push_back(amf_quality(settings.hardware_speed));
-        append_bitrate_args(args, settings.bitrate_mbps);
+        append_hardware_qp_args(args, profile.backend, settings.qp);
         args.push_back("-pix_fmt");
         args.push_back("yuv420p");
     } else if (profile.backend == VideoExportBackend::IntelQsv) {
         args.push_back("-preset");
         args.push_back(qsv_preset(settings.hardware_speed));
-        append_bitrate_args(args, settings.bitrate_mbps);
+        append_hardware_qp_args(args, profile.backend, settings.qp);
         args.push_back("-pix_fmt");
         args.push_back("nv12");
-    } else if (profile.id == "mp4_h264") {
+    } else if (profile.codec == VideoCodec::H264) {
         args.push_back("-preset");
         args.push_back("medium");
         args.push_back("-crf");
-        args.push_back(std::to_string(std::clamp(settings.crf, 0, 51)));
+        args.push_back(std::to_string(std::clamp(settings.crf, 0, video_profile_crf_max(profile))));
         args.push_back("-pix_fmt");
         args.push_back("yuv420p");
-    } else if (profile.id == "mp4_h265") {
+    } else if (profile.codec == VideoCodec::H265) {
         args.push_back("-preset");
         args.push_back("medium");
         args.push_back("-crf");
-        args.push_back(std::to_string(std::clamp(settings.crf, 0, 51)));
+        args.push_back(std::to_string(std::clamp(settings.crf, 0, video_profile_crf_max(profile))));
         args.push_back("-pix_fmt");
         args.push_back("yuv420p");
+    } else if (profile.codec == VideoCodec::Vp9) {
+        args.push_back("-crf");
+        args.push_back(std::to_string(std::clamp(settings.crf, 0, video_profile_crf_max(profile))));
+        args.push_back("-b:v");
+        args.push_back("0");
+        args.push_back("-pix_fmt");
+        args.push_back("yuv420p");
+    } else if (profile.codec == VideoCodec::Av1) {
+        if (profile.encoder == "libsvtav1") {
+            args.push_back("-preset");
+            args.push_back("6");
+        } else if (profile.encoder == "libaom-av1") {
+            args.push_back("-cpu-used");
+            args.push_back("4");
+        }
+        args.push_back("-crf");
+        args.push_back(std::to_string(std::clamp(settings.crf, 0, video_profile_crf_max(profile))));
+        if (profile.encoder == "libaom-av1") {
+            args.push_back("-b:v");
+            args.push_back("0");
+        }
+        args.push_back("-pix_fmt");
+        args.push_back("yuv420p");
+    }
+
+    if (profile.codec == VideoCodec::H265 && settings.container == VideoContainer::Mp4) {
         args.push_back("-tag:v");
         args.push_back("hvc1");
-    } else if (profile.id == "webm_vp9") {
-        args.push_back("-crf");
-        args.push_back(std::to_string(std::clamp(settings.crf, 0, 63)));
-        args.push_back("-b:v");
-        args.push_back("0");
-        args.push_back("-pix_fmt");
-        args.push_back("yuv420p");
-    } else if (profile.id == "mkv_av1_svt") {
-        args.push_back("-preset");
-        args.push_back("6");
-        args.push_back("-crf");
-        args.push_back(std::to_string(std::clamp(settings.crf, 0, 63)));
-        args.push_back("-pix_fmt");
-        args.push_back("yuv420p");
-    } else if (profile.id == "mkv_av1_aom") {
-        args.push_back("-cpu-used");
-        args.push_back("4");
-        args.push_back("-crf");
-        args.push_back(std::to_string(std::clamp(settings.crf, 0, 63)));
-        args.push_back("-b:v");
-        args.push_back("0");
-        args.push_back("-pix_fmt");
-        args.push_back("yuv420p");
-    } else if (profile.id == "mkv_ffv1") {
-        args.push_back("-level");
-        args.push_back("3");
-        args.push_back("-g");
-        args.push_back("1");
-        args.push_back("-pix_fmt");
-        args.push_back("bgra");
     }
 }
 
-void append_movflags_if_needed(std::vector<std::string>& args, const VideoExportProfile& profile)
+void append_movflags_if_needed(std::vector<std::string>& args, VideoContainer container)
 {
-    if (profile.container == VideoContainer::Mp4) {
+    if (container == VideoContainer::Mp4) {
         args.push_back("-movflags");
         args.push_back("+faststart");
     }
@@ -687,7 +738,7 @@ std::vector<std::string> split_names(std::string value)
     return result;
 }
 
-void parse_ffmpeg_list(std::string_view text, bool encoders, std::vector<std::string>& output)
+void parse_ffmpeg_encoder_list(std::string_view text, VideoCapabilities& output)
 {
     std::size_t begin = 0;
     while (begin < text.size()) {
@@ -698,14 +749,41 @@ void parse_ffmpeg_list(std::string_view text, bool encoders, std::vector<std::st
         std::string name;
         input >> flags >> name;
         if (!flags.empty() && !name.empty()) {
-            const bool matches = encoders
-                ? flags.find('V') != std::string::npos
-                : flags.find('E') != std::string::npos;
-            if (matches) {
+            if (flags.find('V') != std::string::npos) {
                 for (std::string split : split_names(name)) {
-                    if (!has_token(output, split)) {
-                        output.push_back(std::move(split));
+                    if (!has_token(output.encoders, split)) {
+                        output.encoders.push_back(std::move(split));
                     }
+                }
+            } else if (flags.find('A') != std::string::npos) {
+                for (std::string split : split_names(name)) {
+                    if (!has_token(output.audio_encoders, split)) {
+                        output.audio_encoders.push_back(std::move(split));
+                    }
+                }
+            }
+        }
+        if (end == std::string_view::npos) {
+            break;
+        }
+        begin = end + 1U;
+    }
+}
+
+void parse_ffmpeg_muxer_list(std::string_view text, std::vector<std::string>& output)
+{
+    std::size_t begin = 0;
+    while (begin < text.size()) {
+        const std::size_t end = text.find('\n', begin);
+        std::string line(text.substr(begin, end == std::string_view::npos ? std::string_view::npos : end - begin));
+        std::istringstream input(line);
+        std::string flags;
+        std::string name;
+        input >> flags >> name;
+        if (!flags.empty() && !name.empty() && flags.find('E') != std::string::npos) {
+            for (std::string split : split_names(name)) {
+                if (!has_token(output, split)) {
+                    output.push_back(std::move(split));
                 }
             }
         }
@@ -742,7 +820,7 @@ std::vector<std::string> hardware_encoder_probe_args(const VideoToolchain& tools
         "-f",
         "lavfi",
         "-i",
-        "color=c=black:size=64x64:rate=1:duration=1",
+        "color=c=black:size=256x256:rate=1:duration=1",
         "-frames:v",
         "1",
         "-an",
@@ -785,19 +863,50 @@ std::vector<std::string> probe_hardware_encoders_impl(const VideoToolchain& tool
     return available;
 }
 
-Image process_frame_for_export(
+bool process_frame_for_export(
     std::vector<unsigned char>& frame,
     const VideoMetadata& metadata,
-    const ProcessSettings& settings)
+    const ProcessSettings& settings,
+    bool high_quality_process,
+    const std::function<VideoGpuProcessResult(const Image&, const ProcessSettings&, Image&, std::string&)>& gpu_process,
+    const std::shared_ptr<VideoExportDiagnostics>& diagnostics,
+    Image& processed,
+    std::string& error)
 {
+    error.clear();
     Image image;
     image.width = metadata.width;
     image.height = metadata.height;
     image.rgba = std::move(frame);
 
-    Image processed = process_image_collapsed(image, settings);
+    if (!high_quality_process && gpu_process && can_process_sampled_collapsed_on_gpu(settings)) {
+        std::string gpu_error;
+        const VideoGpuProcessResult gpu_result = gpu_process(image, settings, processed, gpu_error);
+        if (gpu_result == VideoGpuProcessResult::Success) {
+            if (diagnostics) {
+                diagnostics->gpu_processed_frames.fetch_add(1);
+            }
+            frame = std::move(image.rgba);
+            return true;
+        }
+        if (gpu_result == VideoGpuProcessResult::Canceled) {
+            error = gpu_error.empty() ? "Video export canceled." : std::move(gpu_error);
+            frame = std::move(image.rgba);
+            return false;
+        }
+        if (diagnostics) {
+            diagnostics->gpu_failures.fetch_add(1);
+        }
+    }
+
+    processed = high_quality_process
+        ? process_image_collapsed(image, settings)
+        : process_image_sampled_collapsed(image, settings);
+    if (!high_quality_process && gpu_process && can_process_sampled_collapsed_on_gpu(settings) && diagnostics) {
+        diagnostics->gpu_fallback_frames.fetch_add(1);
+    }
     frame = std::move(image.rgba);
-    return processed;
+    return true;
 }
 
 struct VideoFrameJob {
@@ -950,6 +1059,8 @@ void video_frame_worker(
     VideoFramePipeline& pipeline,
     VideoMetadata metadata,
     ProcessSettings settings,
+    bool high_quality_process,
+    std::function<VideoGpuProcessResult(const Image&, const ProcessSettings&, Image&, std::string&)> gpu_process,
     int output_width,
     int output_height,
     std::size_t output_frame_bytes,
@@ -977,11 +1088,18 @@ void video_frame_worker(
             diagnostics->processing_started.fetch_add(1);
         }
         const auto process_started = std::chrono::steady_clock::now();
-        Image processed = process_frame_for_export(job.rgba, metadata, settings);
+        Image processed;
+        std::string process_error;
+        const bool processed_ok =
+            process_frame_for_export(job.rgba, metadata, settings, high_quality_process, gpu_process, diagnostics, processed, process_error);
         release_frame_buffer(source_pool, std::move(job.rgba), diagnostics);
         if (diagnostics) {
             diagnostics->process_ns.fetch_add(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - process_started).count());
+        }
+        if (!processed_ok) {
+            set_pipeline_error(pipeline, process_error.empty() ? "Video export canceled." : std::move(process_error));
+            return;
         }
         if (processed.width != output_width || processed.height != output_height
             || processed.rgba.size() != output_frame_bytes) {
@@ -1200,6 +1318,11 @@ bool VideoCapabilities::has_encoder(std::string_view encoder) const
     return has_token(encoders, encoder);
 }
 
+bool VideoCapabilities::has_audio_encoder(std::string_view encoder) const
+{
+    return has_token(audio_encoders, encoder);
+}
+
 bool VideoCapabilities::has_hardware_encoder(std::string_view encoder) const
 {
     return has_token(hardware_encoders, encoder);
@@ -1258,9 +1381,10 @@ VideoToolchain find_video_toolchain()
 VideoCapabilities parse_ffmpeg_capabilities(std::string_view encoders, std::string_view muxers)
 {
     VideoCapabilities result;
-    parse_ffmpeg_list(encoders, true, result.encoders);
-    parse_ffmpeg_list(muxers, false, result.muxers);
+    parse_ffmpeg_encoder_list(encoders, result);
+    parse_ffmpeg_muxer_list(muxers, result.muxers);
     std::sort(result.encoders.begin(), result.encoders.end());
+    std::sort(result.audio_encoders.begin(), result.audio_encoders.end());
     std::sort(result.muxers.begin(), result.muxers.end());
     return result;
 }
@@ -1301,38 +1425,48 @@ std::vector<std::string> probe_video_hardware_encoders(
 std::vector<VideoExportProfile> build_video_export_profiles(const VideoCapabilities& capabilities)
 {
     std::vector<VideoExportProfile> profiles;
+    auto has_supported_container = [&](VideoCodec codec) {
+        for (const VideoContainer container : {VideoContainer::Mp4, VideoContainer::Mkv, VideoContainer::Webm}) {
+            VideoExportProfile probe;
+            probe.codec = codec;
+            if (video_profile_supports_container(probe, container)
+                && capabilities.has_muxer(video_container_muxer(container))) {
+                return true;
+            }
+        }
+        return false;
+    };
     auto add_software = [&](VideoExportProfile profile) {
-        if (capabilities.has_encoder(profile.encoder) && capabilities.has_muxer(profile.muxer)) {
+        if (capabilities.has_encoder(profile.encoder) && has_supported_container(profile.codec)) {
             profiles.push_back(std::move(profile));
         }
     };
     auto add_hardware = [&](VideoExportProfile profile) {
-        if (capabilities.has_hardware_encoder(profile.encoder) && capabilities.has_muxer(profile.muxer)) {
+        if (capabilities.has_hardware_encoder(profile.encoder) && has_supported_container(profile.codec)) {
             profiles.push_back(std::move(profile));
         }
     };
 
-    add_software({"mp4_h264", "MP4 / H.264", "libx264", "mp4", ".mp4", VideoContainer::Mp4, VideoExportBackend::Software, 16, 24, false, true});
-    add_software({"mp4_h265", "MP4 / H.265", "libx265", "mp4", ".mp4", VideoContainer::Mp4, VideoExportBackend::Software, 18, 24, false, true});
-    add_software({"webm_vp9", "WebM / VP9", "libvpx-vp9", "webm", ".webm", VideoContainer::Webm, VideoExportBackend::Software, 20, 18, false, true});
-    if (capabilities.has_encoder("libsvtav1") && capabilities.has_muxer("matroska")) {
-        profiles.push_back({"mkv_av1_svt", "MKV / AV1", "libsvtav1", "matroska", ".mkv", VideoContainer::Mkv, VideoExportBackend::Software, 24, 18, false, true});
+    add_software({"h264", "H.264", "libx264", VideoCodec::H264, VideoExportBackend::Software, 18, 16, true});
+    add_software({"h265", "H.265", "libx265", VideoCodec::H265, VideoExportBackend::Software, 20, 16, true});
+    add_software({"vp9", "VP9", "libvpx-vp9", VideoCodec::Vp9, VideoExportBackend::Software, 24, 16, true});
+    if (capabilities.has_encoder("libsvtav1") && has_supported_container(VideoCodec::Av1)) {
+        profiles.push_back({"av1_svt", "AV1 (SVT)", "libsvtav1", VideoCodec::Av1, VideoExportBackend::Software, 26, 16, true});
     } else {
-        add_software({"mkv_av1_aom", "MKV / AV1", "libaom-av1", "matroska", ".mkv", VideoContainer::Mkv, VideoExportBackend::Software, 24, 18, false, true});
+        add_software({"av1_aom", "AV1 (AOM)", "libaom-av1", VideoCodec::Av1, VideoExportBackend::Software, 28, 16, true});
     }
-    add_software({"mkv_ffv1", "MKV / FFV1 Lossless", "ffv1", "matroska", ".mkv", VideoContainer::Mkv, VideoExportBackend::Software, 0, 0, true, false});
 
-    add_hardware({"mp4_h264_nvenc", "MP4 / H.264 NVENC", "h264_nvenc", "mp4", ".mp4", VideoContainer::Mp4, VideoExportBackend::NvidiaNvenc, 0, 28, false, true});
-    add_hardware({"mp4_h265_nvenc", "MP4 / H.265 NVENC", "hevc_nvenc", "mp4", ".mp4", VideoContainer::Mp4, VideoExportBackend::NvidiaNvenc, 0, 28, false, true});
-    add_hardware({"mkv_av1_nvenc", "MKV / AV1 NVENC", "av1_nvenc", "matroska", ".mkv", VideoContainer::Mkv, VideoExportBackend::NvidiaNvenc, 0, 24, false, true});
+    add_hardware({"h264_nvenc", "H.264 NVENC", "h264_nvenc", VideoCodec::H264, VideoExportBackend::NvidiaNvenc, 18, 16, true});
+    add_hardware({"h265_nvenc", "H.265 NVENC", "hevc_nvenc", VideoCodec::H265, VideoExportBackend::NvidiaNvenc, 20, 16, true});
+    add_hardware({"av1_nvenc", "AV1 NVENC", "av1_nvenc", VideoCodec::Av1, VideoExportBackend::NvidiaNvenc, 26, 18, true});
 
-    add_hardware({"mp4_h264_amf", "MP4 / H.264 AMF", "h264_amf", "mp4", ".mp4", VideoContainer::Mp4, VideoExportBackend::AmdAmf, 0, 28, false, true});
-    add_hardware({"mp4_h265_amf", "MP4 / H.265 AMF", "hevc_amf", "mp4", ".mp4", VideoContainer::Mp4, VideoExportBackend::AmdAmf, 0, 28, false, true});
-    add_hardware({"mkv_av1_amf", "MKV / AV1 AMF", "av1_amf", "matroska", ".mkv", VideoContainer::Mkv, VideoExportBackend::AmdAmf, 0, 24, false, true});
+    add_hardware({"h264_amf", "H.264 AMF", "h264_amf", VideoCodec::H264, VideoExportBackend::AmdAmf, 18, 16, true});
+    add_hardware({"h265_amf", "H.265 AMF", "hevc_amf", VideoCodec::H265, VideoExportBackend::AmdAmf, 20, 16, true});
+    add_hardware({"av1_amf", "AV1 AMF", "av1_amf", VideoCodec::Av1, VideoExportBackend::AmdAmf, 26, 18, true});
 
-    add_hardware({"mp4_h264_qsv", "MP4 / H.264 Intel QSV", "h264_qsv", "mp4", ".mp4", VideoContainer::Mp4, VideoExportBackend::IntelQsv, 0, 28, false, true});
-    add_hardware({"mp4_h265_qsv", "MP4 / H.265 Intel QSV", "hevc_qsv", "mp4", ".mp4", VideoContainer::Mp4, VideoExportBackend::IntelQsv, 0, 28, false, true});
-    add_hardware({"mkv_av1_qsv", "MKV / AV1 Intel QSV", "av1_qsv", "matroska", ".mkv", VideoContainer::Mkv, VideoExportBackend::IntelQsv, 0, 24, false, true});
+    add_hardware({"h264_qsv", "H.264 Intel QSV", "h264_qsv", VideoCodec::H264, VideoExportBackend::IntelQsv, 18, 16, true});
+    add_hardware({"h265_qsv", "H.265 Intel QSV", "hevc_qsv", VideoCodec::H265, VideoExportBackend::IntelQsv, 20, 16, true});
+    add_hardware({"av1_qsv", "AV1 Intel QSV", "av1_qsv", VideoCodec::Av1, VideoExportBackend::IntelQsv, 26, 18, true});
 
     return profiles;
 }
@@ -1355,6 +1489,7 @@ VideoMetadata parse_video_metadata(std::string_view video_output, std::string_vi
     }
     metadata.video_codec = value_for(video, "codec_name");
     metadata.audio_codec = value_for(audio, "codec_name");
+    metadata.container_format = lowercase(value_for(video, "format_name"));
     metadata.has_audio = !metadata.audio_codec.empty() && metadata.audio_codec != "N/A";
     return metadata;
 }
@@ -1376,7 +1511,7 @@ VideoMetadata probe_video_metadata(const VideoToolchain& tools, const std::files
         "-show_entries",
         "stream=codec_name,width,height,avg_frame_rate,r_frame_rate,duration,nb_frames",
         "-show_entries",
-        "format=duration",
+        "format=format_name,duration",
         "-of",
         "default=noprint_wrappers=1:nokey=0",
         path.string(),
@@ -1401,6 +1536,7 @@ VideoMetadata probe_video_metadata(const VideoToolchain& tools, const std::files
     };
     ProcessOutput audio = run_process_capture(audio_args, true);
     VideoMetadata metadata = parse_video_metadata(bytes_to_string(video.bytes), audio.exit_code == 0 ? bytes_to_string(audio.bytes) : std::string{});
+    metadata.container_format = detected_container_format(path, metadata.container_format);
     if (metadata.width <= 0 || metadata.height <= 0 || metadata.fps <= 0.0) {
         error = "The selected file does not contain a readable video stream.";
     }
@@ -1478,7 +1614,23 @@ VideoDimensions video_export_dimensions(const VideoMetadata& metadata, int pixel
     return dimensions;
 }
 
-bool can_copy_audio_to_container(std::string_view audio_codec, VideoContainer container)
+bool video_profile_supports_container(const VideoExportProfile& profile, VideoContainer container)
+{
+    if (container == VideoContainer::Mkv) {
+        return true;
+    }
+    if (container == VideoContainer::Webm) {
+        return profile.codec == VideoCodec::Vp9;
+    }
+    return profile.codec == VideoCodec::H264
+        || profile.codec == VideoCodec::H265
+        || profile.codec == VideoCodec::Av1;
+}
+
+bool can_copy_audio_to_container(
+    std::string_view audio_codec,
+    VideoContainer container,
+    std::string_view source_container_format)
 {
     if (audio_codec.empty()) {
         return false;
@@ -1488,18 +1640,124 @@ bool can_copy_audio_to_container(std::string_view audio_codec, VideoContainer co
         return true;
     }
     if (container == VideoContainer::Webm) {
-        return codec == "opus" || codec == "vorbis";
+        return is_webm_container_format(source_container_format) && (codec == "opus" || codec == "vorbis");
     }
     return codec == "aac" || codec == "mp3" || codec == "alac" || codec == "ac3" || codec == "eac3";
+}
+
+bool can_encode_audio_to_container(VideoAudioMode audio_mode, VideoContainer container)
+{
+    if (audio_mode == VideoAudioMode::Aac) {
+        return container == VideoContainer::Mp4 || container == VideoContainer::Mkv;
+    }
+    if (audio_mode == VideoAudioMode::Vorbis) {
+        return container == VideoContainer::Webm || container == VideoContainer::Mkv;
+    }
+    return audio_mode == VideoAudioMode::None || audio_mode == VideoAudioMode::Copy;
+}
+
+std::string video_container_extension(VideoContainer container)
+{
+    switch (container) {
+    case VideoContainer::Mp4:
+        return ".mp4";
+    case VideoContainer::Webm:
+        return ".webm";
+    case VideoContainer::Mkv:
+        return ".mkv";
+    }
+    return ".mp4";
+}
+
+std::string video_container_muxer(VideoContainer container)
+{
+    switch (container) {
+    case VideoContainer::Mp4:
+        return "mp4";
+    case VideoContainer::Webm:
+        return "webm";
+    case VideoContainer::Mkv:
+        return "matroska";
+    }
+    return "mp4";
+}
+
+int video_profile_crf_max(const VideoExportProfile& profile)
+{
+    return profile.codec == VideoCodec::H264 || profile.codec == VideoCodec::H265 ? 51 : 63;
+}
+
+VideoAudioMode effective_audio_mode(const VideoExportSettings& settings)
+{
+    if (!settings.metadata.has_audio) {
+        return VideoAudioMode::None;
+    }
+    if (settings.audio_mode == VideoAudioMode::Copy) {
+        return can_copy_audio_to_container(settings.metadata.audio_codec, settings.container, settings.metadata.container_format)
+            ? VideoAudioMode::Copy
+            : VideoAudioMode::None;
+    }
+    if (can_encode_audio_to_container(settings.audio_mode, settings.container)) {
+        return settings.audio_mode;
+    }
+    return VideoAudioMode::None;
+}
+
+std::string video_export_settings_error(const VideoExportSettings& settings)
+{
+    if (!video_profile_supports_container(settings.profile, settings.container)) {
+        return "Selected video codec is not compatible with the selected container.";
+    }
+    if (!settings.capabilities.muxers.empty()
+        && !settings.capabilities.has_muxer(video_container_muxer(settings.container))) {
+        return "Selected container is not supported by the available FFmpeg build.";
+    }
+    if (!settings.capabilities.encoders.empty()
+        && settings.profile.backend == VideoExportBackend::Software
+        && !settings.capabilities.has_encoder(settings.profile.encoder)) {
+        return "Selected video encoder is not supported by the available FFmpeg build.";
+    }
+    if (!settings.capabilities.hardware_encoders.empty()
+        && settings.profile.backend != VideoExportBackend::Software
+        && !settings.capabilities.has_hardware_encoder(settings.profile.encoder)) {
+        return "Selected hardware video encoder is not available.";
+    }
+    if (!settings.high_quality_process && !can_process_sampled_collapsed_on_gpu(settings.process_settings)) {
+        return "Selected settings require high quality CPU video processing.";
+    }
+    if (!settings.metadata.has_audio || settings.audio_mode == VideoAudioMode::None) {
+        return {};
+    }
+    if (settings.audio_mode == VideoAudioMode::Copy
+        && !can_copy_audio_to_container(settings.metadata.audio_codec, settings.container, settings.metadata.container_format)) {
+        return "Source audio cannot be copied to the selected container.";
+    }
+    if ((settings.audio_mode == VideoAudioMode::Aac || settings.audio_mode == VideoAudioMode::Vorbis)
+        && !can_encode_audio_to_container(settings.audio_mode, settings.container)) {
+        return "Selected audio codec is not compatible with the selected container.";
+    }
+    if (settings.audio_mode == VideoAudioMode::Aac || settings.audio_mode == VideoAudioMode::Vorbis) {
+        const std::string audio_encoder = !settings.audio_encoder.empty()
+            ? settings.audio_encoder
+            : (settings.audio_mode == VideoAudioMode::Aac ? "aac" : "libvorbis");
+        if (!settings.capabilities.audio_encoders.empty()
+            && !settings.capabilities.has_audio_encoder(audio_encoder)) {
+            return "Selected audio encoder is not supported by the available FFmpeg build.";
+        }
+    }
+    return {};
 }
 
 std::vector<std::string> build_video_encode_command(
     const VideoToolchain& tools,
     const VideoExportSettings& settings,
     int input_width,
-    int input_height,
-    bool copy_audio)
+    int input_height)
 {
+    if (!video_export_settings_error(settings).empty()) {
+        return {};
+    }
+
     std::vector<std::string> args = {
         tools.ffmpeg_path.string(),
         "-y",
@@ -1517,16 +1775,15 @@ std::vector<std::string> build_video_encode_command(
         "pipe:0",
     };
 
-    const bool audio_copy_enabled = copy_audio && settings.metadata.has_audio
-        && can_copy_audio_to_container(settings.metadata.audio_codec, settings.profile.container);
-    if (audio_copy_enabled) {
+    const VideoAudioMode audio_mode = effective_audio_mode(settings);
+    if (audio_mode != VideoAudioMode::None) {
         args.push_back("-i");
         args.push_back(settings.source_path.string());
     }
 
     args.push_back("-map");
     args.push_back("0:v:0");
-    if (audio_copy_enabled) {
+    if (audio_mode != VideoAudioMode::None) {
         args.push_back("-map");
         args.push_back("1:a:0");
     }
@@ -1537,16 +1794,28 @@ std::vector<std::string> build_video_encode_command(
         args.push_back("pad=ceil(iw/2)*2:ceil(ih/2)*2");
     }
 
-    if (audio_copy_enabled) {
+    if (audio_mode == VideoAudioMode::Copy) {
         args.push_back("-c:a");
         args.push_back("copy");
+        args.push_back("-shortest");
+    } else if (audio_mode == VideoAudioMode::Aac) {
+        args.push_back("-c:a");
+        args.push_back(settings.audio_encoder.empty() ? "aac" : settings.audio_encoder);
+        args.push_back("-b:a");
+        args.push_back("192k");
+        args.push_back("-shortest");
+    } else if (audio_mode == VideoAudioMode::Vorbis) {
+        args.push_back("-c:a");
+        args.push_back(settings.audio_encoder.empty() ? "libvorbis" : settings.audio_encoder);
+        args.push_back("-q:a");
+        args.push_back("6");
         args.push_back("-shortest");
     } else {
         args.push_back("-an");
     }
 
-    append_movflags_if_needed(args, settings.profile);
-    args.push_back(ensure_extension(settings.destination_path, settings.profile.extension));
+    append_movflags_if_needed(args, settings.container);
+    args.push_back(ensure_extension(settings.destination_path, video_container_extension(settings.container)));
     return args;
 }
 
@@ -1565,6 +1834,10 @@ VideoExportResult export_video_exact(
     }
     if (settings.metadata.width <= 0 || settings.metadata.height <= 0 || settings.metadata.fps <= 0.0) {
         result.error = "Video metadata is incomplete.";
+        return result;
+    }
+    if (std::string settings_error = video_export_settings_error(settings); !settings_error.empty()) {
+        result.error = std::move(settings_error);
         return result;
     }
 
@@ -1590,9 +1863,15 @@ VideoExportResult export_video_exact(
     progress->percent = 0;
     progress->encoding = false;
 
+#ifndef NDEBUG
     result.diagnostic_log_path = video_export_diagnostic_log_path(settings);
     const auto diagnostics = open_video_export_diagnostics(result.diagnostic_log_path);
-    const unsigned int worker_count = video_export_worker_count();
+#else
+    const std::shared_ptr<VideoExportDiagnostics> diagnostics;
+#endif
+    const bool gpu_processing_requested =
+        !settings.high_quality_process && settings.gpu_process && can_process_sampled_collapsed_on_gpu(settings.process_settings);
+    const unsigned int worker_count = gpu_processing_requested ? std::min(4U, video_export_worker_count()) : video_export_worker_count();
     const std::size_t pending_queue_limit = video_export_queue_limit(source_frame_bytes, worker_count);
     const std::size_t completed_queue_limit = video_export_queue_limit(output_frame_bytes, worker_count);
     const std::size_t source_pool_limit = video_export_source_pool_limit(source_frame_bytes, worker_count);
@@ -1600,9 +1879,8 @@ VideoExportResult export_video_exact(
     source_pool->frame_size = source_frame_bytes;
     source_pool->max_cached = source_pool_limit;
 
-    const bool copy_audio = settings.copy_audio && settings.metadata.has_audio
-        && can_copy_audio_to_container(settings.metadata.audio_codec, settings.profile.container);
-    std::vector<std::string> encode_args = build_video_encode_command(tools, settings, output_width, output_height, copy_audio);
+    const VideoAudioMode audio_mode = effective_audio_mode(settings);
+    std::vector<std::string> encode_args = build_video_encode_command(tools, settings, output_width, output_height);
     std::string process_error;
     SDL_Process* encoder = start_process_with_pipes(
         encode_args,
@@ -1662,10 +1940,12 @@ VideoExportResult export_video_exact(
     std::ostringstream start_fields;
     start_fields << ",\"log_path\":" << json_string(result.diagnostic_log_path.string())
                  << ",\"source_path\":" << json_string(settings.source_path.string())
-                 << ",\"destination_path\":" << json_string(ensure_extension(settings.destination_path, settings.profile.extension))
+                 << ",\"destination_path\":" << json_string(ensure_extension(settings.destination_path, video_container_extension(settings.container)))
                  << ",\"profile_id\":" << json_string(settings.profile.id)
                  << ",\"profile_label\":" << json_string(settings.profile.label)
                  << ",\"encoder\":" << json_string(settings.profile.encoder)
+                 << ",\"container\":" << json_string(video_container_muxer(settings.container))
+                 << ",\"audio_mode\":" << json_string(audio_mode == VideoAudioMode::Copy ? "copy" : (audio_mode == VideoAudioMode::Aac ? "aac" : (audio_mode == VideoAudioMode::Vorbis ? "vorbis" : "none")))
                  << ",\"backend\":" << json_string(video_backend_label(settings.profile.backend))
                  << ",\"source_width\":" << settings.metadata.width
                  << ",\"source_height\":" << settings.metadata.height
@@ -1682,7 +1962,8 @@ VideoExportResult export_video_exact(
                  << ",\"pending_queue_limit\":" << pending_queue_limit
                  << ",\"completed_queue_limit\":" << completed_queue_limit
                  << ",\"source_frame_pool_limit\":" << source_pool_limit
-                 << ",\"copy_audio\":" << json_bool(copy_audio)
+                 << ",\"high_quality_process\":" << json_bool(settings.high_quality_process)
+                 << ",\"gpu_processing_requested\":" << json_bool(gpu_processing_requested)
                  << ",\"decode_filter\":" << json_string(decode_filter)
                  << ",\"decode_args\":" << json_string_array(decode_args)
                  << ",\"encode_args\":" << json_string_array(encode_args);
@@ -1725,12 +2006,24 @@ VideoExportResult export_video_exact(
         workers.emplace_back([&pipeline,
                               metadata = settings.metadata,
                               process_settings = settings.process_settings,
+                              high_quality_process = settings.high_quality_process,
+                              gpu_process = settings.gpu_process,
                               output_width,
                               output_height,
                               output_frame_bytes,
                               source_pool,
                               diagnostics]() {
-            video_frame_worker(pipeline, metadata, process_settings, output_width, output_height, output_frame_bytes, source_pool, diagnostics);
+            video_frame_worker(
+                pipeline,
+                metadata,
+                process_settings,
+                high_quality_process,
+                gpu_process,
+                output_width,
+                output_height,
+                output_frame_bytes,
+                source_pool,
+                diagnostics);
         });
     }
 
@@ -1925,8 +2218,8 @@ VideoExportResult export_video_exact(
     }
 
     result.success = true;
-    result.audio_copied = copy_audio;
-    if (settings.copy_audio && settings.metadata.has_audio && !copy_audio) {
+    result.audio_copied = audio_mode == VideoAudioMode::Copy;
+    if (settings.audio_mode != VideoAudioMode::None && settings.metadata.has_audio && audio_mode == VideoAudioMode::None) {
         result.warning = "Audio was not copied because the source audio codec is not compatible with the selected container.";
     }
     write_diagnostic_record(
@@ -1939,25 +2232,13 @@ VideoExportResult export_video_exact(
     return result;
 }
 
-std::string video_profile_extension_filter(const VideoExportProfile& profile)
+std::string video_container_extension_filter(VideoContainer container)
 {
-    if (profile.extension.size() > 1U && profile.extension.front() == '.') {
-        return profile.extension.substr(1U);
+    const std::string extension = video_container_extension(container);
+    if (extension.size() > 1U && extension.front() == '.') {
+        return extension.substr(1U);
     }
-    return profile.extension;
-}
-
-std::string video_hardware_speed_label(VideoHardwareSpeed speed)
-{
-    switch (speed) {
-    case VideoHardwareSpeed::Balanced:
-        return "Balanced";
-    case VideoHardwareSpeed::Fast:
-        return "Fast";
-    case VideoHardwareSpeed::VeryFast:
-        return "Very Fast";
-    }
-    return "Balanced";
+    return extension;
 }
 
 std::string format_video_time(double seconds)

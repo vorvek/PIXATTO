@@ -94,10 +94,7 @@ const pixatto::VideoExportProfile* choose_profile(const std::vector<pixatto::Vid
         return found == profiles.end() ? nullptr : &*found;
     };
 
-    if (const pixatto::VideoExportProfile* profile = by_id("mp4_h264")) {
-        return profile;
-    }
-    if (const pixatto::VideoExportProfile* profile = by_id("mkv_ffv1")) {
+    if (const pixatto::VideoExportProfile* profile = by_id("h264")) {
         return profile;
     }
     const auto software = std::find_if(profiles.begin(), profiles.end(), [](const pixatto::VideoExportProfile& profile) {
@@ -204,17 +201,23 @@ int run()
 
     pixatto::VideoExportSettings settings;
     settings.profile = *profile;
+    settings.capabilities = capabilities;
+    settings.container = pixatto::video_profile_supports_container(*profile, pixatto::VideoContainer::Mp4)
+        && capabilities.has_muxer(pixatto::video_container_muxer(pixatto::VideoContainer::Mp4))
+        ? pixatto::VideoContainer::Mp4
+        : pixatto::VideoContainer::Mkv;
     settings.metadata = metadata;
     settings.source_path = input;
-    settings.destination_path = temp_dir / ("converted" + profile->extension);
+    settings.destination_path = temp_dir / ("converted" + pixatto::video_container_extension(settings.container));
     settings.process_settings.pixel_size = 4;
     settings.crf = profile->crf_default;
-    settings.bitrate_mbps = profile->bitrate_mbps_default;
-    settings.copy_audio = true;
+    settings.qp = profile->qp_default;
+    settings.audio_mode = pixatto::VideoAudioMode::None;
 
     std::shared_ptr<pixatto::VideoExportProgress> progress = std::make_shared<pixatto::VideoExportProgress>();
     pixatto::VideoExportResult exported = pixatto::export_video_exact(tools, settings, progress);
     require(exported.success, exported.error.empty() ? "video export failed" : exported.error.c_str());
+#ifndef NDEBUG
     require(!exported.diagnostic_log_path.empty(), "video export diagnostic log path missing");
     require(std::filesystem::is_regular_file(exported.diagnostic_log_path), "video export diagnostic log missing");
     std::ifstream diagnostic_log(exported.diagnostic_log_path);
@@ -225,10 +228,14 @@ int run()
     require(diagnostics.find("\"event\":\"end\"") != std::string::npos, "video export diagnostic end event missing");
     require(diagnostics.find("\"decoded_frames\"") != std::string::npos, "video export diagnostic counters missing");
     require(diagnostics.find("\"write_ms\"") != std::string::npos, "video export diagnostic timing missing");
+#else
+    require(exported.diagnostic_log_path.empty(), "release export should not write diagnostic log path");
+#endif
 
     std::filesystem::path output = settings.destination_path;
-    if (output.extension() != profile->extension) {
-        output.replace_extension(profile->extension);
+    const std::string extension = pixatto::video_container_extension(settings.container);
+    if (output.extension() != extension) {
+        output.replace_extension(extension);
     }
     pixatto::VideoMetadata output_metadata = pixatto::probe_video_metadata(tools, output, error);
     require(error.empty(), "failed to probe exported video");

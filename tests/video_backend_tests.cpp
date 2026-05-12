@@ -46,11 +46,12 @@ void capabilities_drive_profile_availability()
         " V..... libx265            H.265\n"
         " V..... libvpx-vp9         VP9\n"
         " V..... libsvtav1          AV1\n"
-        " V..... ffv1               FFV1\n"
         " V..... h264_nvenc         NVIDIA H.264\n"
         " V..... hevc_nvenc         NVIDIA H.265\n"
         " V..... av1_amf            AMD AV1\n"
-        " V..... h264_qsv           Intel H.264\n";
+        " V..... h264_qsv           Intel H.264\n"
+        " A..... aac                AAC\n"
+        " A..... libvorbis          Vorbis\n";
     const char* muxers =
         " E mp4             MP4\n"
         " E webm            WebM\n"
@@ -58,6 +59,8 @@ void capabilities_drive_profile_availability()
 
     pixatto::VideoCapabilities capabilities = pixatto::parse_ffmpeg_capabilities(encoders, muxers);
     require(capabilities.has_encoder("libx264"));
+    require(capabilities.has_audio_encoder("aac"));
+    require(capabilities.has_audio_encoder("libvorbis"));
     require(capabilities.has_encoder("h264_nvenc"));
     require(capabilities.has_muxer("matroska"));
     require(!capabilities.has_hardware_encoder("h264_nvenc"));
@@ -66,14 +69,13 @@ void capabilities_drive_profile_availability()
     require(capabilities.has_hardware_encoder("h264_nvenc"));
 
     const std::vector<pixatto::VideoExportProfile> profiles = pixatto::build_video_export_profiles(capabilities);
-    require(require_profile(profiles, "mp4_h264").backend == pixatto::VideoExportBackend::Software);
-    require(require_profile(profiles, "mp4_h265").encoder == "libx265");
-    require(require_profile(profiles, "webm_vp9").container == pixatto::VideoContainer::Webm);
-    require(require_profile(profiles, "mkv_av1_svt").encoder == "libsvtav1");
-    require(require_profile(profiles, "mkv_ffv1").lossless);
-    require(require_profile(profiles, "mp4_h264_nvenc").backend == pixatto::VideoExportBackend::NvidiaNvenc);
-    require(require_profile(profiles, "mkv_av1_amf").backend == pixatto::VideoExportBackend::AmdAmf);
-    require(require_profile(profiles, "mp4_h264_qsv").backend == pixatto::VideoExportBackend::IntelQsv);
+    require(require_profile(profiles, "h264").backend == pixatto::VideoExportBackend::Software);
+    require(require_profile(profiles, "h265").encoder == "libx265");
+    require(require_profile(profiles, "vp9").codec == pixatto::VideoCodec::Vp9);
+    require(require_profile(profiles, "av1_svt").encoder == "libsvtav1");
+    require(require_profile(profiles, "h264_nvenc").backend == pixatto::VideoExportBackend::NvidiaNvenc);
+    require(require_profile(profiles, "av1_amf").backend == pixatto::VideoExportBackend::AmdAmf);
+    require(require_profile(profiles, "h264_qsv").backend == pixatto::VideoExportBackend::IntelQsv);
 }
 
 void metadata_parser_handles_fps_frames_and_audio()
@@ -85,7 +87,8 @@ void metadata_parser_handles_fps_frames_and_audio()
         "avg_frame_rate=30000/1001\n"
         "r_frame_rate=60/1\n"
         "duration=2.5\n"
-        "nb_frames=N/A\n",
+        "nb_frames=N/A\n"
+        "format_name=mov,mp4,m4a,3gp,3g2,mj2\n",
         "codec_name=aac\n");
 
     require(metadata.width == 1920);
@@ -93,6 +96,7 @@ void metadata_parser_handles_fps_frames_and_audio()
     require(metadata.video_codec == "h264");
     require(metadata.has_audio);
     require(metadata.audio_codec == "aac");
+    require(metadata.container_format == "mov,mp4,m4a,3gp,3g2,mj2");
     require(metadata.frame_count == 75);
     require(metadata.variable_frame_rate);
 }
@@ -126,16 +130,20 @@ void output_dimensions_and_audio_rules_are_container_aware()
 
     require(pixatto::can_copy_audio_to_container("aac", pixatto::VideoContainer::Mp4));
     require(!pixatto::can_copy_audio_to_container("flac", pixatto::VideoContainer::Mp4));
-    require(pixatto::can_copy_audio_to_container("opus", pixatto::VideoContainer::Webm));
+    require(pixatto::can_copy_audio_to_container("opus", pixatto::VideoContainer::Webm, "webm"));
+    require(!pixatto::can_copy_audio_to_container("opus", pixatto::VideoContainer::Webm, "matroska"));
     require(pixatto::can_copy_audio_to_container("flac", pixatto::VideoContainer::Mkv));
+    require(pixatto::can_encode_audio_to_container(pixatto::VideoAudioMode::Aac, pixatto::VideoContainer::Mp4));
+    require(!pixatto::can_encode_audio_to_container(pixatto::VideoAudioMode::Vorbis, pixatto::VideoContainer::Mp4));
 }
 
 void encode_command_uses_raw_frame_pipe_and_profile_settings()
 {
     pixatto::VideoCapabilities capabilities;
-    capabilities.encoders = {"h264_amf", "h264_nvenc", "h264_qsv", "libx264"};
-    capabilities.hardware_encoders = {"h264_amf", "h264_nvenc", "h264_qsv"};
-    capabilities.muxers = {"mp4"};
+    capabilities.encoders = {"h264_amf", "h264_nvenc", "h264_qsv", "hevc_nvenc", "libvpx-vp9", "libx264"};
+    capabilities.audio_encoders = {"aac", "libvorbis"};
+    capabilities.hardware_encoders = {"h264_amf", "h264_nvenc", "h264_qsv", "hevc_nvenc"};
+    capabilities.muxers = {"mp4", "matroska", "webm"};
     std::vector<pixatto::VideoExportProfile> profiles = pixatto::build_video_export_profiles(capabilities);
 
     pixatto::VideoToolchain tools;
@@ -143,7 +151,10 @@ void encode_command_uses_raw_frame_pipe_and_profile_settings()
     tools.ffprobe_path = "ffprobe";
 
     pixatto::VideoExportSettings settings;
-    settings.profile = require_profile(profiles, "mp4_h264");
+    settings.profile = require_profile(profiles, "h264");
+    settings.capabilities = capabilities;
+    settings.container = pixatto::VideoContainer::Mp4;
+    settings.audio_mode = pixatto::VideoAudioMode::Copy;
     settings.metadata.width = 640;
     settings.metadata.height = 480;
     settings.metadata.fps = 24.0;
@@ -153,7 +164,7 @@ void encode_command_uses_raw_frame_pipe_and_profile_settings()
     settings.destination_path = "out";
     settings.crf = 16;
 
-    std::vector<std::string> args = pixatto::build_video_encode_command(tools, settings, 320, 240, true);
+    std::vector<std::string> args = pixatto::build_video_encode_command(tools, settings, 320, 240);
     require(has_arg(args, "-f"));
     require(has_arg(args, "rawvideo"));
     require(has_arg(args, "-s"));
@@ -164,27 +175,80 @@ void encode_command_uses_raw_frame_pipe_and_profile_settings()
     require(has_arg(args, "+faststart"));
     require(args.back() == "out.mp4");
 
-    settings.profile = require_profile(profiles, "mp4_h264_nvenc");
+    settings.profile = require_profile(profiles, "h264_nvenc");
     settings.hardware_speed = pixatto::VideoHardwareSpeed::VeryFast;
-    settings.bitrate_mbps = 32;
-    args = pixatto::build_video_encode_command(tools, settings, 320, 240, false);
+    settings.qp = 16;
+    settings.audio_mode = pixatto::VideoAudioMode::None;
+    args = pixatto::build_video_encode_command(tools, settings, 320, 240);
     require(has_arg(args, "h264_nvenc"));
     require(has_arg(args, "p1"));
-    require(has_arg(args, "32M"));
+    require(has_arg(args, "constqp"));
+    require(has_arg(args, "16"));
     require(has_arg(args, "-an"));
 
-    settings.profile = require_profile(profiles, "mp4_h264_amf");
+    settings.profile = require_profile(profiles, "h265_nvenc");
+    settings.container = pixatto::VideoContainer::Mp4;
+    args = pixatto::build_video_encode_command(tools, settings, 320, 240);
+    require(has_arg(args, "hevc_nvenc"));
+    require(has_arg(args, "-tag:v"));
+    require(has_arg(args, "hvc1"));
+
+    settings.profile = require_profile(profiles, "h264_amf");
     settings.hardware_speed = pixatto::VideoHardwareSpeed::Fast;
-    args = pixatto::build_video_encode_command(tools, settings, 320, 240, false);
+    args = pixatto::build_video_encode_command(tools, settings, 320, 240);
     require(has_arg(args, "h264_amf"));
     require(has_arg(args, "speed"));
+    require(has_arg(args, "cqp"));
+    require(has_arg(args, "-qp_i"));
 
-    settings.profile = require_profile(profiles, "mp4_h264_qsv");
+    settings.profile = require_profile(profiles, "h264_qsv");
     settings.hardware_speed = pixatto::VideoHardwareSpeed::Balanced;
-    args = pixatto::build_video_encode_command(tools, settings, 320, 240, false);
+    args = pixatto::build_video_encode_command(tools, settings, 320, 240);
     require(has_arg(args, "h264_qsv"));
     require(has_arg(args, "medium"));
     require(has_arg(args, "nv12"));
+    require(has_arg(args, "-global_quality"));
+
+    settings.profile = require_profile(profiles, "vp9");
+    settings.container = pixatto::VideoContainer::Webm;
+    settings.audio_mode = pixatto::VideoAudioMode::Vorbis;
+    settings.audio_encoder = "libvorbis";
+    settings.destination_path = "web-out";
+    args = pixatto::build_video_encode_command(tools, settings, 320, 240);
+    require(has_arg(args, "libvpx-vp9"));
+    require(has_arg(args, "libvorbis"));
+    require(args.back() == "web-out.webm");
+
+    settings.profile = require_profile(profiles, "h264");
+    settings.container = pixatto::VideoContainer::Webm;
+    args = pixatto::build_video_encode_command(tools, settings, 320, 240);
+    require(args.empty());
+
+    settings.container = pixatto::VideoContainer::Mp4;
+    settings.audio_mode = pixatto::VideoAudioMode::Vorbis;
+    args = pixatto::build_video_encode_command(tools, settings, 320, 240);
+    require(args.empty());
+
+    settings.audio_mode = pixatto::VideoAudioMode::None;
+    settings.process_settings.dither_mode = pixatto::DitherMode::Atkinson;
+    settings.process_settings.dither_amount = 1.0F;
+    settings.high_quality_process = false;
+    args = pixatto::build_video_encode_command(tools, settings, 320, 240);
+    require(args.empty());
+
+    settings.process_settings = {};
+    settings.high_quality_process = true;
+    settings.audio_mode = pixatto::VideoAudioMode::None;
+    settings.capabilities = capabilities;
+    settings.capabilities.muxers = {"matroska"};
+    args = pixatto::build_video_encode_command(tools, settings, 320, 240);
+    require(args.empty());
+
+    settings.capabilities = capabilities;
+    settings.audio_mode = pixatto::VideoAudioMode::Aac;
+    settings.audio_encoder = "missing-aac";
+    args = pixatto::build_video_encode_command(tools, settings, 320, 240);
+    require(args.empty());
 }
 
 } // namespace

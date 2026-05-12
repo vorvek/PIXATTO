@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -21,6 +22,13 @@ enum class VideoContainer {
     Mkv,
 };
 
+enum class VideoCodec {
+    H264,
+    H265,
+    Av1,
+    Vp9,
+};
+
 enum class VideoExportBackend {
     Software,
     NvidiaNvenc,
@@ -32,6 +40,19 @@ enum class VideoHardwareSpeed {
     Balanced,
     Fast,
     VeryFast,
+};
+
+enum class VideoAudioMode {
+    None,
+    Copy,
+    Aac,
+    Vorbis,
+};
+
+enum class VideoGpuProcessResult {
+    Success,
+    Fallback,
+    Canceled,
 };
 
 struct VideoToolchain {
@@ -48,10 +69,12 @@ struct VideoToolchain {
 
 struct VideoCapabilities {
     std::vector<std::string> encoders;
+    std::vector<std::string> audio_encoders;
     std::vector<std::string> hardware_encoders;
     std::vector<std::string> muxers;
 
     [[nodiscard]] bool has_encoder(std::string_view encoder) const;
+    [[nodiscard]] bool has_audio_encoder(std::string_view encoder) const;
     [[nodiscard]] bool has_hardware_encoder(std::string_view encoder) const;
     [[nodiscard]] bool has_muxer(std::string_view muxer) const;
 };
@@ -64,6 +87,7 @@ struct VideoMetadata {
     long long frame_count = 0;
     std::string video_codec;
     std::string audio_codec;
+    std::string container_format;
     bool has_audio = false;
     bool variable_frame_rate = false;
 };
@@ -72,26 +96,28 @@ struct VideoExportProfile {
     std::string id;
     std::string label;
     std::string encoder;
-    std::string muxer;
-    std::string extension;
-    VideoContainer container = VideoContainer::Mp4;
+    VideoCodec codec = VideoCodec::H264;
     VideoExportBackend backend = VideoExportBackend::Software;
     int crf_default = 18;
-    int bitrate_mbps_default = 24;
-    bool lossless = false;
+    int qp_default = 16;
     bool needs_even_dimensions = true;
 };
 
 struct VideoExportSettings {
     VideoExportProfile profile;
     VideoMetadata metadata;
+    VideoCapabilities capabilities;
     std::filesystem::path source_path;
     std::filesystem::path destination_path;
     ProcessSettings process_settings;
+    VideoContainer container = VideoContainer::Mp4;
+    VideoAudioMode audio_mode = VideoAudioMode::None;
+    std::string audio_encoder;
     int crf = 18;
-    int bitrate_mbps = 24;
+    int qp = 16;
     VideoHardwareSpeed hardware_speed = VideoHardwareSpeed::Balanced;
-    bool copy_audio = true;
+    bool high_quality_process = true;
+    std::function<VideoGpuProcessResult(const Image&, const ProcessSettings&, Image&, std::string&)> gpu_process;
 };
 
 struct VideoExportProgress {
@@ -136,19 +162,25 @@ struct VideoDimensions {
     double seconds,
     std::string& error);
 [[nodiscard]] VideoDimensions video_export_dimensions(const VideoMetadata& metadata, int pixel_size, const VideoExportProfile& profile);
-[[nodiscard]] bool can_copy_audio_to_container(std::string_view audio_codec, VideoContainer container);
+[[nodiscard]] bool video_profile_supports_container(const VideoExportProfile& profile, VideoContainer container);
+[[nodiscard]] bool can_copy_audio_to_container(
+    std::string_view audio_codec,
+    VideoContainer container,
+    std::string_view source_container_format = {});
+[[nodiscard]] bool can_encode_audio_to_container(VideoAudioMode audio_mode, VideoContainer container);
+[[nodiscard]] std::string video_container_extension(VideoContainer container);
+[[nodiscard]] std::string video_container_muxer(VideoContainer container);
+[[nodiscard]] int video_profile_crf_max(const VideoExportProfile& profile);
 [[nodiscard]] std::vector<std::string> build_video_encode_command(
     const VideoToolchain& tools,
     const VideoExportSettings& settings,
     int input_width,
-    int input_height,
-    bool copy_audio);
+    int input_height);
 [[nodiscard]] VideoExportResult export_video_exact(
     const VideoToolchain& tools,
     const VideoExportSettings& settings,
     std::shared_ptr<VideoExportProgress> progress);
-[[nodiscard]] std::string video_profile_extension_filter(const VideoExportProfile& profile);
-[[nodiscard]] std::string video_hardware_speed_label(VideoHardwareSpeed speed);
+[[nodiscard]] std::string video_container_extension_filter(VideoContainer container);
 [[nodiscard]] std::string format_video_time(double seconds);
 [[nodiscard]] std::string format_video_fps(double fps);
 

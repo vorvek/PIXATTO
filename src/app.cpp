@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cctype>
@@ -203,16 +204,128 @@ const char* bayer_pattern_label(int size)
     return "16x16";
 }
 
-std::string ensure_extension(std::filesystem::path path, const char* expected_extension)
+std::string app_lowercase_extension(const std::filesystem::path& path)
 {
     std::string extension = path.extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
     });
-    if (extension != expected_extension) {
+    return extension;
+}
+
+std::string ensure_extension(std::filesystem::path path, const char* expected_extension)
+{
+    if (app_lowercase_extension(path) != expected_extension) {
         path.replace_extension(expected_extension);
     }
     return path.string();
+}
+
+const char* video_container_label(VideoContainer container)
+{
+    switch (container) {
+    case VideoContainer::Mp4:
+        return "MP4";
+    case VideoContainer::Webm:
+        return "WebM";
+    case VideoContainer::Mkv:
+        return "MKV";
+    }
+    return "MP4";
+}
+
+TextId video_audio_mode_label(VideoAudioMode mode)
+{
+    switch (mode) {
+    case VideoAudioMode::None:
+        return TextId::VideoNoAudio;
+    case VideoAudioMode::Copy:
+        return TextId::VideoAudioCopy;
+    case VideoAudioMode::Aac:
+        return TextId::VideoAudioAac;
+    case VideoAudioMode::Vorbis:
+        return TextId::VideoAudioVorbis;
+    }
+    return TextId::VideoNoAudio;
+}
+
+TextId video_hardware_speed_text(VideoHardwareSpeed speed)
+{
+    switch (speed) {
+    case VideoHardwareSpeed::Balanced:
+        return TextId::VideoHardwareSpeedBalanced;
+    case VideoHardwareSpeed::Fast:
+        return TextId::VideoHardwareSpeedFast;
+    case VideoHardwareSpeed::VeryFast:
+        return TextId::VideoHardwareSpeedVeryFast;
+    }
+    return TextId::VideoHardwareSpeedBalanced;
+}
+
+bool video_low_quality_process_allowed(const ProcessSettings& settings)
+{
+    return can_process_sampled_collapsed_on_gpu(settings);
+}
+
+std::vector<VideoContainer> video_container_options(
+    const VideoExportProfile& profile,
+    const VideoCapabilities& capabilities)
+{
+    std::vector<VideoContainer> result;
+    const std::array containers = profile.codec == VideoCodec::Vp9
+        ? std::array{VideoContainer::Webm, VideoContainer::Mkv, VideoContainer::Mp4}
+        : std::array{VideoContainer::Mp4, VideoContainer::Mkv, VideoContainer::Webm};
+    for (const VideoContainer container : containers) {
+        if (video_profile_supports_container(profile, container)
+            && capabilities.has_muxer(video_container_muxer(container))) {
+            result.push_back(container);
+        }
+    }
+    return result;
+}
+
+struct VideoAudioOption {
+    VideoAudioMode mode = VideoAudioMode::None;
+    std::string encoder;
+};
+
+std::vector<VideoAudioOption> video_audio_options(
+    const VideoMetadata& metadata,
+    const VideoCapabilities& capabilities,
+    VideoContainer container)
+{
+    std::vector<VideoAudioOption> result;
+    result.push_back({VideoAudioMode::None, {}});
+    if (!metadata.has_audio) {
+        return result;
+    }
+    if (can_copy_audio_to_container(metadata.audio_codec, container, metadata.container_format)) {
+        result.push_back({VideoAudioMode::Copy, {}});
+    }
+    if (can_encode_audio_to_container(VideoAudioMode::Aac, container) && capabilities.has_audio_encoder("aac")) {
+        result.push_back({VideoAudioMode::Aac, "aac"});
+    }
+    if (can_encode_audio_to_container(VideoAudioMode::Vorbis, container)) {
+        if (capabilities.has_audio_encoder("libvorbis")) {
+            result.push_back({VideoAudioMode::Vorbis, "libvorbis"});
+        } else if (capabilities.has_audio_encoder("vorbis")) {
+            result.push_back({VideoAudioMode::Vorbis, "vorbis"});
+        }
+    }
+    return result;
+}
+
+VideoAudioMode preferred_video_audio_mode(const std::vector<VideoAudioOption>& options)
+{
+    for (const VideoAudioMode preferred : {VideoAudioMode::Copy, VideoAudioMode::Aac, VideoAudioMode::Vorbis, VideoAudioMode::None}) {
+        const auto found = std::find_if(options.begin(), options.end(), [preferred](const VideoAudioOption& option) {
+            return option.mode == preferred;
+        });
+        if (found != options.end()) {
+            return found->mode;
+        }
+    }
+    return VideoAudioMode::None;
 }
 
 std::string sanitize_filename_suffix(std::string suffix)
@@ -898,6 +1011,7 @@ int App::run()
     while (running_) {
         process_events(running_);
         drain_file_commands();
+        service_video_export_gpu_queue();
         update_pending_model_load();
         update_pending_video_export();
         update_pending_video_hardware_probe();
@@ -917,6 +1031,10 @@ void App::shutdown()
     destroy_texture(result_texture_);
     clear_video_document();
     clear_model_document();
+    if (window_ && gl_context_) {
+        SDL_GL_MakeCurrent(window_, gl_context_);
+    }
+    video_export_gpu_processor_.reset();
     model_renderer_.shutdown();
 
     if (ImGui::GetCurrentContext()) {
@@ -2078,6 +2196,10 @@ void App::render_video_view()
         ImGui::SameLine();
         if (ImGui::SmallButton(imgui_label(TextId::Stop, "CancelVideoExport").c_str())) {
             pending_video_export_->progress->cancel_requested = true;
+            close_video_export_gpu_queue(
+                pending_video_export_->gpu_queue,
+                VideoGpuProcessResult::Canceled,
+                "Video export canceled.");
         }
     }
 }
@@ -2971,13 +3093,13 @@ void App::render_video_export_dialog()
                 static_cast<int>(video_.profiles.size()) - 1);
             video_export_dialog_->selected_profile = selected_profile;
             const VideoExportProfile& profile = video_.profiles[static_cast<std::size_t>(selected_profile)];
-            if (ImGui::BeginCombo(imgui_label(TextId::VideoExportProfile, "VideoExportProfile").c_str(), profile.label.c_str())) {
+            if (ImGui::BeginCombo(imgui_label(TextId::VideoCodec, "VideoCodec").c_str(), profile.label.c_str())) {
                 for (std::size_t index = 0; index < video_.profiles.size(); ++index) {
                     const bool selected = selected_profile == static_cast<int>(index);
                     if (ImGui::Selectable(video_.profiles[index].label.c_str(), selected)) {
                         video_export_dialog_->selected_profile = static_cast<int>(index);
                         video_export_dialog_->crf = video_.profiles[index].crf_default;
-                        video_export_dialog_->bitrate_mbps = video_.profiles[index].bitrate_mbps_default;
+                        video_export_dialog_->qp = video_.profiles[index].qp_default;
                     }
                     if (selected) {
                         ImGui::SetItemDefaultFocus();
@@ -2990,25 +3112,47 @@ void App::render_video_export_dialog()
             }
 
             const VideoExportProfile& active_profile = video_.profiles[static_cast<std::size_t>(video_export_dialog_->selected_profile)];
-            if (active_profile.backend == VideoExportBackend::Software && !active_profile.lossless) {
+            std::vector<VideoContainer> container_options = video_container_options(active_profile, video_.capabilities);
+            if (container_options.empty()) {
+                ImGui::TextWrapped("%s", text(TextId::StatusVideoNoExportProfiles));
+            } else {
+                if (std::find(container_options.begin(), container_options.end(), video_export_dialog_->container) == container_options.end()) {
+                    video_export_dialog_->container = container_options.front();
+                }
+                if (ImGui::BeginCombo(
+                        imgui_label(TextId::VideoContainer, "VideoContainer").c_str(),
+                        video_container_label(video_export_dialog_->container))) {
+                    for (VideoContainer container : container_options) {
+                        const bool selected = video_export_dialog_->container == container;
+                        if (ImGui::Selectable(video_container_label(container), selected)) {
+                            video_export_dialog_->container = container;
+                        }
+                        if (selected) {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+            }
+
+            if (active_profile.backend == VideoExportBackend::Software) {
                 ImGui::SliderInt(
                     imgui_label(TextId::VideoQualityCrf, "VideoCrf").c_str(),
                     &video_export_dialog_->crf,
                     0,
-                    active_profile.id == "webm_vp9" || active_profile.id.find("av1") != std::string::npos ? 63 : 51);
-            } else if (active_profile.backend != VideoExportBackend::Software) {
+                    video_profile_crf_max(active_profile));
+            } else {
                 ImGui::SliderInt(
-                    imgui_label(TextId::VideoBitrate, "VideoBitrate").c_str(),
-                    &video_export_dialog_->bitrate_mbps,
-                    1,
-                    500,
-                    "%d Mbps");
-                const std::string speed_label = video_hardware_speed_label(video_export_dialog_->hardware_speed);
-                if (ImGui::BeginCombo(imgui_label(TextId::VideoHardwareSpeed, "VideoHardwareSpeed").c_str(), speed_label.c_str())) {
+                    imgui_label(TextId::VideoQualityQp, "VideoQp").c_str(),
+                    &video_export_dialog_->qp,
+                    0,
+                    51);
+                const char* speed_label = text(video_hardware_speed_text(video_export_dialog_->hardware_speed));
+                if (ImGui::BeginCombo(imgui_label(TextId::VideoHardwareSpeed, "VideoHardwareSpeed").c_str(), speed_label)) {
                     for (VideoHardwareSpeed speed : {VideoHardwareSpeed::Balanced, VideoHardwareSpeed::Fast, VideoHardwareSpeed::VeryFast}) {
                         const bool selected = video_export_dialog_->hardware_speed == speed;
-                        const std::string label = video_hardware_speed_label(speed);
-                        if (ImGui::Selectable(label.c_str(), selected)) {
+                        const char* label = text(video_hardware_speed_text(speed));
+                        if (ImGui::Selectable(label, selected)) {
                             video_export_dialog_->hardware_speed = speed;
                         }
                         if (selected) {
@@ -3018,24 +3162,49 @@ void App::render_video_export_dialog()
                     ImGui::EndCombo();
                 }
                 ImGui::TextWrapped("%s", text(TextId::VideoHardwareHint));
-            } else {
-                ImGui::TextDisabled("%s", text(TextId::VideoLosslessHint));
             }
 
-            const bool audio_compatible = video_.metadata.has_audio
-                && can_copy_audio_to_container(video_.metadata.audio_codec, active_profile.container);
-            bool copy_audio_visible = video_export_dialog_->copy_audio && audio_compatible;
-            if (!audio_compatible) {
+            std::vector<VideoAudioOption> audio_options =
+                video_audio_options(video_.metadata, video_.capabilities, video_export_dialog_->container);
+            const auto selected_audio = std::find_if(audio_options.begin(), audio_options.end(), [&](const VideoAudioOption& option) {
+                return option.mode == video_export_dialog_->audio_mode;
+            });
+            if (selected_audio == audio_options.end()) {
+                video_export_dialog_->audio_mode = preferred_video_audio_mode(audio_options);
+            }
+            if (ImGui::BeginCombo(
+                    imgui_label(TextId::VideoAudio, "VideoAudio").c_str(),
+                    text(video_audio_mode_label(video_export_dialog_->audio_mode)))) {
+                for (const VideoAudioOption& option : audio_options) {
+                    const bool selected = option.mode == video_export_dialog_->audio_mode;
+                    if (ImGui::Selectable(text(video_audio_mode_label(option.mode)), selected)) {
+                        video_export_dialog_->audio_mode = option.mode;
+                    }
+                    if (selected) {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            if (video_.metadata.has_audio && audio_options.size() == 1U) {
+                ImGui::TextDisabled("%s", text(TextId::VideoAudioIncompatible));
+            }
+
+            const bool can_low_quality_process = video_low_quality_process_allowed(edit_session_.settings());
+            if (!can_low_quality_process) {
+                video_export_dialog_->high_quality_process = true;
                 ImGui::BeginDisabled();
             }
-            if (ImGui::Checkbox(imgui_label(TextId::VideoCopyAudio, "VideoCopyAudio").c_str(), &copy_audio_visible) && audio_compatible) {
-                video_export_dialog_->copy_audio = copy_audio_visible;
-            }
-            if (!audio_compatible) {
+            ImGui::Checkbox(
+                imgui_label(TextId::VideoHighQualityProcess, "VideoHighQualityProcess").c_str(),
+                &video_export_dialog_->high_quality_process);
+            if (!can_low_quality_process) {
                 ImGui::EndDisabled();
-                if (video_.metadata.has_audio) {
-                    ImGui::TextDisabled("%s", text(TextId::VideoAudioIncompatible));
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    ImGui::SetTooltip("%s", text(TextId::VideoCpuRequiredProcessHint));
                 }
+            } else if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", text(TextId::VideoHighQualityProcessHint));
             }
 
             const VideoDimensions dimensions = video_export_dimensions(video_.metadata, edit_session_.settings().pixel_size, active_profile);
@@ -3061,12 +3230,14 @@ void App::render_video_export_dialog()
                 if (stem.empty()) {
                     stem = "video";
                 }
-                std::filesystem::path default_path = current_image_path_.parent_path() / (stem + "-pixatto" + active_profile.extension);
-                const std::string filter_label = active_profile.label + " (*" + active_profile.extension + ")";
+                const std::string extension = video_container_extension(video_export_dialog_->container);
+                std::filesystem::path default_path = current_image_path_.parent_path() / (stem + "-pixatto" + extension);
+                const std::string filter_label =
+                    std::string(video_container_label(video_export_dialog_->container)) + " (*" + extension + ")";
                 (void)file_commands_.request_export_video_dialog(
                     window_,
                     filter_label,
-                    video_profile_extension_filter(active_profile),
+                    video_container_extension_filter(video_export_dialog_->container),
                     default_path,
                     video_export_dialog_->selected_profile);
                 ImGui::CloseCurrentPopup();
@@ -3421,8 +3592,16 @@ void App::request_export_video()
     state.request_open = true;
     state.selected_profile = 0;
     if (!video_.profiles.empty()) {
-        state.crf = video_.profiles.front().crf_default;
-        state.bitrate_mbps = video_.profiles.front().bitrate_mbps_default;
+        const VideoExportProfile& profile = video_.profiles.front();
+        state.crf = profile.crf_default;
+        state.qp = profile.qp_default;
+        const std::vector<VideoContainer> containers = video_container_options(profile, video_.capabilities);
+        if (!containers.empty()) {
+            state.container = containers.front();
+        }
+        const std::vector<VideoAudioOption> audio_options =
+            video_audio_options(video_.metadata, video_.capabilities, state.container);
+        state.audio_mode = preferred_video_audio_mode(audio_options);
     }
     video_export_dialog_ = state;
 }
@@ -3695,6 +3874,12 @@ void App::update_pending_video_hardware_probe()
             video_export_dialog_->selected_profile,
             0,
             static_cast<int>(video_.profiles.size()) - 1);
+        const VideoExportProfile& profile = video_.profiles[static_cast<std::size_t>(video_export_dialog_->selected_profile)];
+        const std::vector<VideoContainer> containers = video_container_options(profile, video_.capabilities);
+        if (!containers.empty()
+            && std::find(containers.begin(), containers.end(), video_export_dialog_->container) == containers.end()) {
+            video_export_dialog_->container = containers.front();
+        }
     }
 }
 
@@ -3711,6 +3896,11 @@ void App::update_pending_video_export()
 
     PendingVideoExportState pending = std::move(*pending_video_export_);
     pending_video_export_.reset();
+    close_video_export_gpu_queue(
+        pending.gpu_queue,
+        VideoGpuProcessResult::Fallback,
+        "Video export GPU processing is closed.");
+    set_video_export_fast_swap(false);
 
     VideoExportResult result;
     try {
@@ -3730,8 +3920,9 @@ void App::update_pending_video_export()
     }
 
     std::filesystem::path exported_path = pending.settings.destination_path;
-    if (lowercase_extension(exported_path) != pending.settings.profile.extension) {
-        exported_path.replace_extension(pending.settings.profile.extension);
+    const std::string extension = video_container_extension(pending.settings.container);
+    if (app_lowercase_extension(exported_path) != extension) {
+        exported_path.replace_extension(extension);
     }
     last_export_path_ = exported_path;
     std::string message = textf(TextId::StatusVideoExportedFormat, {{"name", exported_path.filename().string()}});
@@ -3743,6 +3934,111 @@ void App::update_pending_video_export()
         append_runtime_log(std::string("video-export: diagnostics ") + quote_path_for_log(result.diagnostic_log_path));
     }
     set_status(std::move(message));
+}
+
+void App::service_video_export_gpu_queue()
+{
+    if (!pending_video_export_ || !pending_video_export_->gpu_queue) {
+        return;
+    }
+
+    constexpr int kMaxGpuRequestsPerService = 4;
+    int serviced = 0;
+    const auto queue = pending_video_export_->gpu_queue;
+
+    bool context_ready = ensure_gl_context_current();
+    if (context_ready && !video_export_gpu_processor_) {
+        video_export_gpu_processor_ = std::make_unique<GpuImageProcessor>();
+    }
+
+    while (serviced < kMaxGpuRequestsPerService) {
+        std::shared_ptr<VideoExportGpuRequest> request;
+        {
+            std::unique_lock lock(queue->mutex);
+            if (queue->requests.empty()) {
+                return;
+            }
+            request = std::move(queue->requests.front());
+            queue->requests.pop_front();
+        }
+
+        Image result;
+        std::string error;
+        const bool success = context_ready
+            && video_export_gpu_processor_
+            && request->source
+            && video_export_gpu_processor_->process_sampled_collapsed(*request->source, request->settings, result, error);
+        if (!context_ready && error.empty()) {
+            error = "OpenGL export context is not available.";
+        }
+        const VideoGpuProcessResult status = success ? VideoGpuProcessResult::Success : VideoGpuProcessResult::Fallback;
+        if (!success && error.empty()) {
+            error = "OpenGL export processing failed.";
+        }
+
+        {
+            std::lock_guard request_lock(request->mutex);
+            request->status = status;
+            request->result = std::move(result);
+            request->error = error;
+            request->finished = true;
+        }
+        request->cv.notify_one();
+        ++serviced;
+
+        if (!success) {
+            close_video_export_gpu_queue(queue, VideoGpuProcessResult::Fallback, std::move(error));
+            return;
+        }
+    }
+}
+
+void App::close_video_export_gpu_queue(
+    const std::shared_ptr<VideoExportGpuQueue>& queue,
+    VideoGpuProcessResult status,
+    std::string error)
+{
+    if (!queue) {
+        return;
+    }
+    if (error.empty()) {
+        error = status == VideoGpuProcessResult::Canceled
+            ? "Video export canceled."
+            : "Video export GPU processing is unavailable.";
+    }
+
+    std::deque<std::shared_ptr<VideoExportGpuRequest>> requests;
+    {
+        std::lock_guard lock(queue->mutex);
+        queue->closed = true;
+        queue->closed_status = status;
+        queue->close_error = error;
+        requests.swap(queue->requests);
+    }
+    queue->cv.notify_all();
+
+    for (const std::shared_ptr<VideoExportGpuRequest>& request : requests) {
+        {
+            std::lock_guard request_lock(request->mutex);
+            request->status = status;
+            request->error = error;
+            request->finished = true;
+        }
+        request->cv.notify_one();
+    }
+}
+
+void App::set_video_export_fast_swap(bool enabled)
+{
+    if (video_export_fast_swap_ == enabled || !window_ || !gl_context_) {
+        return;
+    }
+    if (!ensure_gl_context_current()) {
+        return;
+    }
+    if (SDL_GL_SetSwapInterval(enabled ? 0 : 1)) {
+        video_export_fast_swap_ = enabled;
+    }
 }
 
 void App::handle_file_command(const FileCommand& command)
@@ -4114,15 +4410,70 @@ void App::start_video_export_to_path(const std::filesystem::path& path)
     VideoExportSettings settings;
     settings.profile = video_.profiles[static_cast<std::size_t>(profile_index)];
     settings.metadata = video_.metadata;
+    settings.capabilities = video_.capabilities;
     settings.source_path = video_.source;
     settings.destination_path = path;
     settings.process_settings = edit_session_.settings();
+    settings.container = video_export_dialog_->container;
+    settings.audio_mode = video_export_dialog_->audio_mode;
+    const std::vector<VideoAudioOption> audio_options =
+        video_audio_options(video_.metadata, video_.capabilities, settings.container);
+    const auto audio_option = std::find_if(audio_options.begin(), audio_options.end(), [&](const VideoAudioOption& option) {
+        return option.mode == settings.audio_mode;
+    });
+    if (audio_option != audio_options.end()) {
+        settings.audio_encoder = audio_option->encoder;
+    } else {
+        settings.audio_mode = VideoAudioMode::None;
+    }
     settings.crf = video_export_dialog_->crf;
-    settings.bitrate_mbps = video_export_dialog_->bitrate_mbps;
+    settings.qp = video_export_dialog_->qp;
     settings.hardware_speed = video_export_dialog_->hardware_speed;
-    settings.copy_audio = video_export_dialog_->copy_audio;
+    settings.high_quality_process = video_export_dialog_->high_quality_process;
 
     PendingVideoExportState pending;
+    if (!settings.high_quality_process && can_process_sampled_collapsed_on_gpu(settings.process_settings)) {
+        pending.gpu_queue = std::make_shared<VideoExportGpuQueue>();
+        auto gpu_disabled = std::make_shared<std::atomic_bool>(false);
+        // The export worker owns the source image until this callback returns.
+        settings.gpu_process = [queue = pending.gpu_queue, gpu_disabled](
+                                   const Image& source,
+                                   const ProcessSettings& process_settings,
+                                   Image& result,
+                                   std::string& error) {
+            if (gpu_disabled->load()) {
+                error = "Video export GPU processing is disabled.";
+                return VideoGpuProcessResult::Fallback;
+            }
+            auto request = std::make_shared<VideoExportGpuRequest>();
+            request->source = &source;
+            request->settings = process_settings;
+
+            {
+                std::lock_guard lock(queue->mutex);
+                if (queue->closed) {
+                    error = queue->close_error.empty() ? "Video export GPU processing is closed." : queue->close_error;
+                    return queue->closed_status;
+                }
+                queue->requests.push_back(request);
+            }
+            queue->cv.notify_one();
+
+            std::unique_lock request_lock(request->mutex);
+            request->cv.wait(request_lock, [&request]() {
+                return request->finished;
+            });
+            if (request->status != VideoGpuProcessResult::Success) {
+                if (request->status == VideoGpuProcessResult::Fallback) {
+                    gpu_disabled->store(true);
+                }
+                error = std::move(request->error);
+                return request->status;
+            }
+            result = std::move(request->result);
+            return VideoGpuProcessResult::Success;
+        };
+    }
     pending.settings = settings;
     pending.progress = std::make_shared<VideoExportProgress>();
     pending.started_at = std::chrono::steady_clock::now();
@@ -4132,6 +4483,7 @@ void App::start_video_export_to_path(const std::filesystem::path& path)
     });
     video_.playing = false;
     pending_video_export_ = std::move(pending);
+    set_video_export_fast_swap(pending_video_export_->gpu_queue != nullptr);
     set_status(textf(TextId::StatusVideoExportStartedFormat, {{"profile", settings.profile.label}}));
 }
 
@@ -4862,6 +5214,11 @@ void App::clear_video_document()
     video_playback_decoder_.close();
     if (pending_video_export_ && pending_video_export_->progress) {
         pending_video_export_->progress->cancel_requested = true;
+        close_video_export_gpu_queue(
+            pending_video_export_->gpu_queue,
+            VideoGpuProcessResult::Canceled,
+            "Video export canceled.");
+        set_video_export_fast_swap(false);
         try {
             (void)pending_video_export_->result.get();
         } catch (...) {
