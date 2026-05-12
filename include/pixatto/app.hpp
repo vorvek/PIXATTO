@@ -8,15 +8,19 @@
 #include "pixatto/palette.hpp"
 #include "pixatto/preset.hpp"
 #include "pixatto/processing_edit_session.hpp"
+#include "pixatto/video_backend.hpp"
+#include "pixatto/video_playback_decoder.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <functional>
 #include <future>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -45,6 +49,7 @@ private:
     enum class DocumentMode {
         Image,
         Model,
+        Video,
     };
 
     enum class BatchExportFormat {
@@ -113,6 +118,49 @@ private:
         std::chrono::steady_clock::time_point started_at;
         std::chrono::steady_clock::time_point last_log;
     };
+    struct VideoPreviewResult {
+        Image decoded;
+        Image processed;
+        std::string error;
+    };
+    struct PendingVideoPreviewState {
+        double time_seconds = 0.0;
+        double decode_time_seconds = 0.0;
+        std::uint64_t generation = 0;
+        std::future<VideoPreviewResult> result;
+    };
+    struct PendingVideoHardwareProbeState {
+        std::future<std::vector<std::string>> result;
+    };
+    struct VideoDocumentState {
+        std::filesystem::path source;
+        VideoToolchain tools;
+        VideoMetadata metadata;
+        VideoCapabilities capabilities;
+        std::vector<VideoExportProfile> profiles;
+        double current_time = 0.0;
+        bool playing = false;
+        bool hardware_encoders_probed = false;
+        bool playback_decoder_available = false;
+        bool playback_seek_pending = false;
+        bool playback_warning_reported = false;
+        std::chrono::steady_clock::time_point last_tick;
+        std::uint64_t preview_generation = 0;
+    };
+    struct VideoExportDialogState {
+        int selected_profile = 0;
+        int crf = 18;
+        int bitrate_mbps = 24;
+        VideoHardwareSpeed hardware_speed = VideoHardwareSpeed::Balanced;
+        bool copy_audio = true;
+        bool request_open = false;
+    };
+    struct PendingVideoExportState {
+        VideoExportSettings settings;
+        std::shared_ptr<VideoExportProgress> progress;
+        std::future<VideoExportResult> result;
+        std::chrono::steady_clock::time_point started_at;
+    };
     struct ModelMaterialSlot {
         int mesh_index = -1;
         int material_index = -1;
@@ -154,6 +202,7 @@ private:
     void render_close_file_button();
     void render_model_texture_gallery();
     void render_model_view();
+    void render_video_view();
     void render_number_edit_popup();
     void render_drop_confirm_popup();
     void render_delete_palette_popup();
@@ -165,17 +214,25 @@ private:
     void render_preset_overwrite_popup();
     void render_delete_preset_popup();
     void render_batch_dialog();
+    void render_video_export_dialog();
     void handle_shortcuts();
     void update_batch_processing();
+    void update_video_playback();
+    void update_pending_video_hardware_probe();
+    void update_pending_video_preview();
+    void update_pending_video_export();
     void update_preview_if_needed();
+    [[nodiscard]] bool decode_video_preview_with_playback_decoder(double requested_time, double decode_time);
     void rebuild_texture(Texture& texture, const Image& image, bool nearest);
     void configure_fonts();
     void destroy_texture(Texture& texture);
     void request_open_image();
     void request_open_model();
+    void request_open_video();
     void request_import_palette();
     void request_export_png();
     void request_export_raw();
+    void request_export_video();
     void request_batch();
     void request_batch_images();
     void request_batch_output_folder();
@@ -186,7 +243,10 @@ private:
     void load_document_from_path(const std::filesystem::path& path);
     void load_image_from_path(const std::filesystem::path& path);
     void load_model_from_path(const std::filesystem::path& path);
+    void load_video_from_path(const std::filesystem::path& path);
     void finish_model_load_from_path(const std::filesystem::path& path, ModelLoadResult loaded);
+    void request_video_preview(double time_seconds, bool force);
+    void start_video_export_to_path(const std::filesystem::path& path);
     void close_current_file();
     void import_model_texture_from_path(const std::filesystem::path& path);
     void assign_model_texture_to_slot(const ModelMaterialSlot& slot, std::size_t texture_index);
@@ -216,6 +276,7 @@ private:
     void start_batch_processing();
     void process_next_batch_image();
     void clear_model_document();
+    void clear_video_document();
     void reset_model_camera();
     void reset_model_camera_to_origin();
     void pan_model_camera(float delta_x, float delta_y);
@@ -256,6 +317,9 @@ private:
     DocumentMode document_mode_ = DocumentMode::Image;
     Image original_;
     Image result_;
+    Image video_decoded_frame_;
+    double video_decoded_frame_time_ = 0.0;
+    bool video_decoded_frame_valid_ = false;
     Texture original_texture_;
     Texture result_texture_;
     ModelDocument model_;
@@ -263,6 +327,8 @@ private:
     std::vector<Texture> model_original_textures_;
     std::vector<Texture> model_result_textures_;
     ModelRenderer model_renderer_;
+    VideoDocumentState video_;
+    VideoPlaybackDecoder video_playback_decoder_;
 
     ProcessingEditSession edit_session_;
     std::vector<Palette> palettes_;
@@ -293,6 +359,10 @@ private:
     std::optional<Palette> pending_delete_palette_;
     std::optional<PendingPaletteImportState> pending_palette_import_;
     std::optional<PendingModelLoadState> pending_model_load_;
+    std::optional<PendingVideoPreviewState> pending_video_preview_;
+    std::optional<PendingVideoHardwareProbeState> pending_video_hardware_probe_;
+    std::optional<VideoExportDialogState> video_export_dialog_;
+    std::optional<PendingVideoExportState> pending_video_export_;
     std::deque<std::size_t> pending_model_texture_exports_;
     bool open_drop_confirm_ = false;
     bool open_delete_palette_confirm_ = false;

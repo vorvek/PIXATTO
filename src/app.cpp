@@ -899,6 +899,10 @@ int App::run()
         process_events(running_);
         drain_file_commands();
         update_pending_model_load();
+        update_pending_video_export();
+        update_pending_video_hardware_probe();
+        update_pending_video_preview();
+        update_video_playback();
         update_preview_if_needed();
         update_batch_processing();
         render_frame();
@@ -911,6 +915,7 @@ void App::shutdown()
 {
     destroy_texture(original_texture_);
     destroy_texture(result_texture_);
+    clear_video_document();
     clear_model_document();
     model_renderer_.shutdown();
 
@@ -1016,6 +1021,7 @@ void App::render_frame()
     render_preset_overwrite_popup();
     render_delete_preset_popup();
     render_batch_dialog();
+    render_video_export_dialog();
     render_language_picker_popup();
     render_help_dialog();
     render_about_dialog();
@@ -1047,6 +1053,9 @@ void App::render_menu_bar()
         if (ImGui::MenuItem(imgui_label(TextId::OpenImage, "ImportImage").c_str())) {
             request_open_image();
         }
+        if (ImGui::MenuItem(imgui_label(TextId::ImportVideo, "ImportVideo").c_str())) {
+            request_open_video();
+        }
         if (ImGui::MenuItem(imgui_label(TextId::ImportPalette, "ImportPalette").c_str())) {
             request_import_palette();
         }
@@ -1057,11 +1066,17 @@ void App::render_menu_bar()
     }
     ImGui::SameLine();
     if (ImGui::BeginMenu(imgui_label(TextId::Export, "Export").c_str())) {
-        if (ImGui::MenuItem(imgui_label(TextId::ExportPng, "ExportPng").c_str())) {
-            request_export_png();
-        }
-        if (ImGui::MenuItem(imgui_label(TextId::ExportRaw, "ExportRaw").c_str())) {
-            request_export_raw();
+        if (document_mode_ == DocumentMode::Video) {
+            if (ImGui::MenuItem(imgui_label(TextId::ExportVideo, "ExportVideo").c_str())) {
+                request_export_video();
+            }
+        } else {
+            if (ImGui::MenuItem(imgui_label(TextId::ExportPng, "ExportPng").c_str())) {
+                request_export_png();
+            }
+            if (ImGui::MenuItem(imgui_label(TextId::ExportRaw, "ExportRaw").c_str())) {
+                request_export_raw();
+            }
         }
         ImGui::EndMenu();
     }
@@ -1071,8 +1086,14 @@ void App::render_menu_bar()
     }
     ImGui::SameLine();
     const bool single_viewport = viewport_mode_ == ViewportMode::Single;
+    if (document_mode_ == DocumentMode::Video) {
+        ImGui::BeginDisabled();
+    }
     if (ImGui::Button(imgui_label(single_viewport ? TextId::TwoViews : TextId::OneView, "ViewportMode").c_str())) {
         viewport_mode_ = single_viewport ? ViewportMode::Split : ViewportMode::Single;
+    }
+    if (document_mode_ == DocumentMode::Video) {
+        ImGui::EndDisabled();
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("%s", text(single_viewport ? TextId::ShowOriginalAndResult : TextId::ShowOnlyResult));
@@ -1324,6 +1345,7 @@ void App::render_about_dialog()
     wrapped_bullet(text(TextId::AboutDependencyTinyObj));
     wrapped_bullet(text(TextId::AboutDependencyUfbx));
     wrapped_bullet(text(TextId::AboutDependencyTinyXml));
+    wrapped_bullet(text(TextId::AboutDependencyFfmpegExternal));
 
     ImGui::Spacing();
     ImGui::TextUnformatted(text(TextId::AboutPalettesTitle));
@@ -1802,6 +1824,13 @@ void App::render_viewports()
         return;
     }
 
+    if (document_mode_ == DocumentMode::Video) {
+        ImGui::BeginChild("VideoPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
+        render_video_view();
+        ImGui::EndChild();
+        return;
+    }
+
     if (viewport_mode_ == ViewportMode::Single) {
         ImGui::BeginChild("ResultPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
         render_working_view();
@@ -1926,6 +1955,131 @@ void App::render_image_view(TextId label, const char* id, Texture& texture, floa
         ImGui::Image(imgui_texture_id(texture.handle), size);
     }
     ImGui::EndChild();
+}
+
+void App::render_video_view()
+{
+    const ImVec2 pane_available = ImGui::GetContentRegionAvail();
+
+    ImGui::TextUnformatted(text(TextId::VideoPreview));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(180.0F);
+    ImGui::SliderFloat(imgui_label(TextId::Zoom, "ZoomVideo").c_str(), &result_zoom_, 0.05F, 32.0F, "%.2fx", ImGuiSliderFlags_Logarithmic);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("1:1##OneToOneVideo")) {
+        result_zoom_ = 1.0F;
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton(imgui_label(TextId::Fit, "FitVideo").c_str())) {
+        result_zoom_ = fit_zoom_for_size(result_texture_.width, result_texture_.height, pane_available);
+    }
+    render_close_file_button();
+
+    ImGui::Separator();
+
+    const bool export_progress_visible = pending_video_export_ && pending_video_export_->progress;
+    const float timeline_height = ImGui::GetFrameHeightWithSpacing() * (export_progress_visible ? 5.4F : 3.2F);
+    ImGui::BeginChild("VideoScroll", ImVec2(0, -timeline_height), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar);
+    if (result_texture_.handle == 0U) {
+        const ImVec2 avail = ImGui::GetContentRegionAvail();
+        ImGui::SetCursorPos(ImVec2(std::max(0.0F, (avail.x - 160.0F) * 0.5F), std::max(0.0F, (avail.y - 20.0F) * 0.5F)));
+        ImGui::TextDisabled("%s", text(TextId::NoVideoFrame));
+    } else {
+        if (ImGui::IsWindowHovered() && ImGui::GetIO().KeyCtrl && ImGui::GetIO().MouseWheel != 0.0F) {
+            result_zoom_ = std::clamp(result_zoom_ * (ImGui::GetIO().MouseWheel > 0.0F ? 1.12F : 0.89F), 0.05F, 32.0F);
+        }
+
+        const ImVec2 size(static_cast<float>(result_texture_.width) * result_zoom_, static_cast<float>(result_texture_.height) * result_zoom_);
+        ImGui::Image(imgui_texture_id(result_texture_.handle), size);
+    }
+    ImGui::EndChild();
+
+    ImGui::Separator();
+    const bool has_video = document_mode_ == DocumentMode::Video && video_.metadata.duration_seconds > 0.0;
+    if (!has_video) {
+        ImGui::TextDisabled("%s", text(TextId::NoVideoLoaded));
+        return;
+    }
+
+    const bool disabled_by_export = pending_video_export_.has_value();
+    if (disabled_by_export) {
+        ImGui::BeginDisabled();
+    }
+
+    if (ImGui::SmallButton(imgui_label(video_.playing ? TextId::Pause : TextId::Play, "VideoPlayPause").c_str())) {
+        video_.playing = !video_.playing;
+        video_.last_tick = std::chrono::steady_clock::now();
+        if (video_.playing) {
+            video_.playback_seek_pending = true;
+        } else {
+            request_video_preview(video_.current_time, true);
+        }
+    }
+    ImGui::SameLine();
+    float timeline = static_cast<float>(video_.current_time);
+    ImGui::SetNextItemWidth(std::max(120.0F, ImGui::GetContentRegionAvail().x - 190.0F));
+    if (ImGui::SliderFloat(
+            imgui_label(TextId::Timeline, "VideoTimeline").c_str(),
+            &timeline,
+            0.0F,
+            static_cast<float>(std::max(0.001, video_.metadata.duration_seconds)),
+            "")) {
+        video_.current_time = std::clamp(static_cast<double>(timeline), 0.0, video_.metadata.duration_seconds);
+        video_.playing = false;
+        request_video_preview(video_.current_time, true);
+    }
+    ImGui::SameLine();
+    ImGui::TextUnformatted((format_video_time(video_.current_time) + " / " + format_video_time(video_.metadata.duration_seconds)).c_str());
+
+    const long long frame_index = video_.metadata.fps > 0.0
+        ? static_cast<long long>(std::floor(video_.current_time * video_.metadata.fps))
+        : 0;
+    const long long total_frames = std::max<long long>(1, video_.metadata.frame_count);
+    const long long display_frame = std::clamp(frame_index + 1, 1LL, total_frames);
+    const std::string frame_text = textf(
+        TextId::VideoFrameFormat,
+        {{"frame", std::to_string(display_frame)},
+         {"total", std::to_string(total_frames)},
+         {"fps", format_video_fps(video_.metadata.fps)}});
+    ImGui::TextDisabled("%s", frame_text.c_str());
+
+    if (disabled_by_export) {
+        ImGui::EndDisabled();
+    }
+
+    if (export_progress_visible) {
+        const int percent = pending_video_export_->progress->percent.load();
+        ImGui::ProgressBar(std::clamp(percent / 100.0F, 0.0F, 1.0F), ImVec2(-1.0F, 0.0F));
+        const int done = pending_video_export_->progress->frames_done.load();
+        const int total = pending_video_export_->progress->frames_total.load();
+        const bool encoding = pending_video_export_->progress->encoding.load();
+        const double elapsed_seconds = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - pending_video_export_->started_at)
+                                           .count();
+        std::string eta = "--";
+        if (!encoding && done > 0 && total > done) {
+            eta = format_video_time(elapsed_seconds * static_cast<double>(total - done) / static_cast<double>(done));
+        } else if (total > 0 && done >= total) {
+            eta = format_video_time(0.0);
+        }
+        const std::string timing = textf(
+            TextId::VideoExportTimingFormat,
+            {{"elapsed", format_video_time(elapsed_seconds)}, {"eta", eta}});
+        const std::string progress = encoding
+            ? text(TextId::VideoEncoding)
+            : textf(
+                TextId::VideoExportProgressFormat,
+                {{"percent", std::to_string(percent)},
+                 {"done", std::to_string(done)},
+                 {"total", std::to_string(std::max(done, total))}});
+        ImGui::TextDisabled("%s", progress.c_str());
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", timing.c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton(imgui_label(TextId::Stop, "CancelVideoExport").c_str())) {
+            pending_video_export_->progress->cancel_requested = true;
+        }
+    }
 }
 
 void App::render_close_file_button()
@@ -2778,6 +2932,166 @@ void App::render_batch_dialog()
     }
 }
 
+void App::render_video_export_dialog()
+{
+    const std::string popup_id = imgui_label(TextId::VideoExportWindowTitle, "VideoExport");
+
+    if (video_export_dialog_ && video_export_dialog_->request_open) {
+        ImGui::OpenPopup(popup_id.c_str());
+        video_export_dialog_->request_open = false;
+    }
+
+    if (!video_export_dialog_) {
+        return;
+    }
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const float popup_width = std::min(560.0F, std::max(420.0F, viewport->WorkSize.x - 48.0F));
+    ImGui::SetNextWindowSize(ImVec2(popup_width, 0.0F), ImGuiCond_Appearing);
+
+    bool popup_open = true;
+    bool reset_popup = false;
+    if (ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+        if (!popup_open) {
+            ImGui::CloseCurrentPopup();
+            reset_popup = true;
+        }
+
+        const bool hardware_probe_running = pending_video_hardware_probe_.has_value();
+        if (video_.profiles.empty()) {
+            if (hardware_probe_running) {
+                ImGui::TextWrapped("%s", text(TextId::VideoHardwareProbeRunning));
+            } else {
+                ImGui::TextWrapped("%s", text(TextId::StatusVideoNoExportProfiles));
+            }
+        } else {
+            int selected_profile = std::clamp(
+                video_export_dialog_->selected_profile,
+                0,
+                static_cast<int>(video_.profiles.size()) - 1);
+            video_export_dialog_->selected_profile = selected_profile;
+            const VideoExportProfile& profile = video_.profiles[static_cast<std::size_t>(selected_profile)];
+            if (ImGui::BeginCombo(imgui_label(TextId::VideoExportProfile, "VideoExportProfile").c_str(), profile.label.c_str())) {
+                for (std::size_t index = 0; index < video_.profiles.size(); ++index) {
+                    const bool selected = selected_profile == static_cast<int>(index);
+                    if (ImGui::Selectable(video_.profiles[index].label.c_str(), selected)) {
+                        video_export_dialog_->selected_profile = static_cast<int>(index);
+                        video_export_dialog_->crf = video_.profiles[index].crf_default;
+                        video_export_dialog_->bitrate_mbps = video_.profiles[index].bitrate_mbps_default;
+                    }
+                    if (selected) {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            if (hardware_probe_running) {
+                ImGui::TextDisabled("%s", text(TextId::VideoHardwareProbeRunning));
+            }
+
+            const VideoExportProfile& active_profile = video_.profiles[static_cast<std::size_t>(video_export_dialog_->selected_profile)];
+            if (active_profile.backend == VideoExportBackend::Software && !active_profile.lossless) {
+                ImGui::SliderInt(
+                    imgui_label(TextId::VideoQualityCrf, "VideoCrf").c_str(),
+                    &video_export_dialog_->crf,
+                    0,
+                    active_profile.id == "webm_vp9" || active_profile.id.find("av1") != std::string::npos ? 63 : 51);
+            } else if (active_profile.backend != VideoExportBackend::Software) {
+                ImGui::SliderInt(
+                    imgui_label(TextId::VideoBitrate, "VideoBitrate").c_str(),
+                    &video_export_dialog_->bitrate_mbps,
+                    1,
+                    500,
+                    "%d Mbps");
+                const std::string speed_label = video_hardware_speed_label(video_export_dialog_->hardware_speed);
+                if (ImGui::BeginCombo(imgui_label(TextId::VideoHardwareSpeed, "VideoHardwareSpeed").c_str(), speed_label.c_str())) {
+                    for (VideoHardwareSpeed speed : {VideoHardwareSpeed::Balanced, VideoHardwareSpeed::Fast, VideoHardwareSpeed::VeryFast}) {
+                        const bool selected = video_export_dialog_->hardware_speed == speed;
+                        const std::string label = video_hardware_speed_label(speed);
+                        if (ImGui::Selectable(label.c_str(), selected)) {
+                            video_export_dialog_->hardware_speed = speed;
+                        }
+                        if (selected) {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+                ImGui::TextWrapped("%s", text(TextId::VideoHardwareHint));
+            } else {
+                ImGui::TextDisabled("%s", text(TextId::VideoLosslessHint));
+            }
+
+            const bool audio_compatible = video_.metadata.has_audio
+                && can_copy_audio_to_container(video_.metadata.audio_codec, active_profile.container);
+            bool copy_audio_visible = video_export_dialog_->copy_audio && audio_compatible;
+            if (!audio_compatible) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::Checkbox(imgui_label(TextId::VideoCopyAudio, "VideoCopyAudio").c_str(), &copy_audio_visible) && audio_compatible) {
+                video_export_dialog_->copy_audio = copy_audio_visible;
+            }
+            if (!audio_compatible) {
+                ImGui::EndDisabled();
+                if (video_.metadata.has_audio) {
+                    ImGui::TextDisabled("%s", text(TextId::VideoAudioIncompatible));
+                }
+            }
+
+            const VideoDimensions dimensions = video_export_dimensions(video_.metadata, edit_session_.settings().pixel_size, active_profile);
+            ImGui::TextDisabled(
+                "%s",
+                textf(
+                    TextId::VideoOutputSizeFormat,
+                    {{"width", std::to_string(dimensions.width)}, {"height", std::to_string(dimensions.height)}})
+                    .c_str());
+            if (dimensions.padded) {
+                ImGui::TextWrapped("%s", text(TextId::VideoOddDimensionWarning));
+            }
+            if (video_.metadata.variable_frame_rate) {
+                ImGui::TextWrapped("%s", text(TextId::VideoVfrWarning));
+            }
+
+            const bool can_export = !file_commands_.dialog_open() && !pending_video_export_;
+            if (!can_export) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::Button(imgui_label(TextId::ExportVideo, "ConfirmVideoExport").c_str())) {
+                std::string stem = current_image_path_.stem().string();
+                if (stem.empty()) {
+                    stem = "video";
+                }
+                std::filesystem::path default_path = current_image_path_.parent_path() / (stem + "-pixatto" + active_profile.extension);
+                const std::string filter_label = active_profile.label + " (*" + active_profile.extension + ")";
+                (void)file_commands_.request_export_video_dialog(
+                    window_,
+                    filter_label,
+                    video_profile_extension_filter(active_profile),
+                    default_path,
+                    video_export_dialog_->selected_profile);
+                ImGui::CloseCurrentPopup();
+            }
+            if (!can_export) {
+                ImGui::EndDisabled();
+            }
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button(imgui_label(TextId::Cancel, "CancelVideoExport").c_str()) || !popup_open) {
+            ImGui::CloseCurrentPopup();
+            reset_popup = true;
+        }
+
+        ImGui::EndPopup();
+    } else if (!ImGui::IsPopupOpen(popup_id.c_str()) && !file_commands_.dialog_open()) {
+        reset_popup = true;
+    }
+
+    if (reset_popup) {
+        video_export_dialog_.reset();
+    }
+}
+
 void App::handle_shortcuts()
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -2808,7 +3122,7 @@ void App::update_preview_if_needed()
         }
         result_ = process_image(original_, edit_session_.settings());
         rebuild_texture(result_texture_, result_, true);
-    } else {
+    } else if (document_mode_ == DocumentMode::Model) {
         model_processed_textures_.clear();
         model_processed_textures_.reserve(model_.textures.size());
         for (const ModelTexture& texture : model_.textures) {
@@ -2823,11 +3137,69 @@ void App::update_preview_if_needed()
             rebuild_texture(model_result_textures_[index], model_processed_textures_[index], true);
         }
         model_renderer_.update_processed_textures(model_processed_textures_);
+    } else {
+        if (video_.playing) {
+            edit_session_.clear_preview_dirty();
+            return;
+        }
+        request_video_preview(video_.current_time, true);
+        return;
     }
     edit_session_.clear_preview_dirty();
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
     status_ = textf(TextId::StatusPreviewUpdatedFormat, {{"ms", std::to_string(elapsed)}});
+}
+
+bool App::decode_video_preview_with_playback_decoder(double requested_time, double decode_time)
+{
+    if (!video_.playback_decoder_available || !video_playback_decoder_.is_open()) {
+        return false;
+    }
+
+    std::string error;
+    if (!video_playback_decoder_.seek(decode_time, error)) {
+        set_status(textf(TextId::StatusVideoPreviewFailedFormat, {{"error", error}}));
+        video_.playback_decoder_available = false;
+        return false;
+    }
+
+    const double frame_interval = video_.metadata.fps > 0.0 ? 1.0 / video_.metadata.fps : 1.0 / 30.0;
+    Image decoded;
+    bool got_frame = false;
+    const int max_advance_frames = std::max(1, static_cast<int>(std::ceil(video_.metadata.fps > 0.0 ? video_.metadata.fps * 2.0 : 60.0)));
+    for (int index = 0; index < max_advance_frames; ++index) {
+        Image candidate;
+        double candidate_time = 0.0;
+        error.clear();
+        if (!video_playback_decoder_.read_next_frame(candidate, candidate_time, error)) {
+            break;
+        }
+        decoded = std::move(candidate);
+        got_frame = true;
+        if (candidate_time + frame_interval * 0.5 >= decode_time) {
+            break;
+        }
+    }
+
+    if (!got_frame) {
+        if (!error.empty()) {
+            set_status(textf(TextId::StatusVideoPreviewFailedFormat, {{"error", error}}));
+            video_.playback_decoder_available = false;
+        }
+        return false;
+    }
+
+    video_decoded_frame_ = std::move(decoded);
+    video_decoded_frame_time_ = decode_time;
+    video_decoded_frame_valid_ = !video_decoded_frame_.empty();
+    const ProcessSettings& settings = edit_session_.settings();
+    result_ = collapse_pixel_blocks(process_image(video_decoded_frame_, settings), settings.pixel_size);
+    rebuild_texture(result_texture_, result_, true);
+    video_.current_time = requested_time;
+    video_.playback_seek_pending = true;
+    edit_session_.clear_preview_dirty();
+    return true;
 }
 
 void App::rebuild_texture(Texture& texture, const Image& image, bool nearest)
@@ -2975,6 +3347,11 @@ void App::request_open_model()
     (void)file_commands_.request_open_model_dialog(window_, file_dialog_labels());
 }
 
+void App::request_open_video()
+{
+    (void)file_commands_.request_open_video_dialog(window_, file_dialog_labels());
+}
+
 void App::request_import_palette()
 {
     (void)file_commands_.request_import_palette_dialog(window_, file_dialog_labels());
@@ -3014,6 +3391,40 @@ void App::request_export_raw()
     }
 
     (void)file_commands_.request_export_raw_dialog(window_, file_dialog_labels());
+}
+
+void App::request_export_video()
+{
+    if (document_mode_ != DocumentMode::Video || video_.source.empty()) {
+        set_status(text(TextId::StatusVideoExportSkipped));
+        return;
+    }
+    if (pending_video_export_) {
+        set_status(text(TextId::StatusVideoExportAlreadyRunning));
+        return;
+    }
+    if (!video_.hardware_encoders_probed && !pending_video_hardware_probe_) {
+        PendingVideoHardwareProbeState pending;
+        const VideoToolchain tools = video_.tools;
+        const VideoCapabilities capabilities = video_.capabilities;
+        pending.result = std::async(std::launch::async, [tools, capabilities]() {
+            return probe_video_hardware_encoders(tools, capabilities);
+        });
+        pending_video_hardware_probe_ = std::move(pending);
+    }
+    if (video_.profiles.empty() && video_.hardware_encoders_probed) {
+        set_status(text(TextId::StatusVideoNoExportProfiles));
+        return;
+    }
+
+    VideoExportDialogState state;
+    state.request_open = true;
+    state.selected_profile = 0;
+    if (!video_.profiles.empty()) {
+        state.crf = video_.profiles.front().crf_default;
+        state.bitrate_mbps = video_.profiles.front().bitrate_mbps_default;
+    }
+    video_export_dialog_ = state;
 }
 
 void App::request_batch()
@@ -3124,6 +3535,216 @@ void App::update_pending_model_load()
     }
 }
 
+void App::update_video_playback()
+{
+    if (document_mode_ != DocumentMode::Video || !video_.playing || pending_video_export_) {
+        return;
+    }
+    if (pending_video_preview_) {
+        return;
+    }
+    if (!video_.playback_decoder_available || !video_playback_decoder_.is_open()) {
+        if (!video_.playback_warning_reported) {
+            set_status(text(TextId::StatusVideoPlaybackUnavailable));
+            video_.playback_warning_reported = true;
+        }
+        video_.playing = false;
+        request_video_preview(video_.current_time, true);
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (video_.last_tick.time_since_epoch().count() == 0) {
+        video_.last_tick = now;
+    }
+
+    const double frame_interval = video_.metadata.fps > 0.0 ? 1.0 / video_.metadata.fps : 1.0 / 30.0;
+    const double elapsed = std::chrono::duration<double>(now - video_.last_tick).count();
+    if (!video_.playback_seek_pending && elapsed < frame_interval) {
+        return;
+    }
+
+    std::string error;
+    if (video_.playback_seek_pending) {
+        if (!video_playback_decoder_.seek(video_.current_time, error)) {
+            set_status(textf(TextId::StatusVideoPreviewFailedFormat, {{"error", error}}));
+            video_.playing = false;
+            video_.playback_decoder_available = false;
+            request_video_preview(video_.current_time, true);
+            return;
+        }
+        video_.playback_seek_pending = false;
+    }
+
+    Image decoded;
+    double timestamp = 0.0;
+    if (!video_playback_decoder_.read_next_frame(decoded, timestamp, error)) {
+        video_.playing = false;
+        if (!error.empty()) {
+            set_status(textf(TextId::StatusVideoPreviewFailedFormat, {{"error", error}}));
+            video_.playback_decoder_available = false;
+        }
+        request_video_preview(video_.current_time, true);
+        return;
+    }
+
+    video_.last_tick = now;
+    video_.current_time = std::clamp(timestamp, 0.0, std::max(0.0, video_.metadata.duration_seconds));
+    video_decoded_frame_ = std::move(decoded);
+    video_decoded_frame_time_ = video_.current_time;
+    video_decoded_frame_valid_ = !video_decoded_frame_.empty();
+    if (video_decoded_frame_valid_) {
+        const ProcessSettings& settings = edit_session_.settings();
+        result_ = collapse_pixel_blocks(process_image(video_decoded_frame_, settings), settings.pixel_size);
+        rebuild_texture(result_texture_, result_, true);
+        edit_session_.clear_preview_dirty();
+    }
+    if (video_.metadata.duration_seconds > 0.0 && video_.current_time >= video_.metadata.duration_seconds - frame_interval * 0.5) {
+        video_.current_time = video_.metadata.duration_seconds;
+        video_.playing = false;
+    }
+}
+
+void App::update_pending_video_preview()
+{
+    if (!pending_video_preview_) {
+        if (document_mode_ == DocumentMode::Video && edit_session_.preview_dirty()) {
+            request_video_preview(video_.current_time, true);
+        }
+        return;
+    }
+
+    using namespace std::chrono_literals;
+    if (pending_video_preview_->result.wait_for(0ms) != std::future_status::ready) {
+        return;
+    }
+
+    PendingVideoPreviewState pending = std::move(*pending_video_preview_);
+    pending_video_preview_.reset();
+
+    VideoPreviewResult loaded;
+    try {
+        loaded = pending.result.get();
+    } catch (const std::exception& error) {
+        loaded.error = error.what();
+    } catch (...) {
+        loaded.error = "unknown error";
+    }
+
+    if (pending.generation != video_.preview_generation) {
+        if (loaded.error.empty() && !loaded.decoded.empty()) {
+            video_decoded_frame_ = std::move(loaded.decoded);
+            video_decoded_frame_time_ = pending.decode_time_seconds;
+            video_decoded_frame_valid_ = true;
+        }
+        if (edit_session_.preview_dirty()) {
+            request_video_preview(video_.current_time, true);
+        }
+        return;
+    }
+
+    if (!loaded.error.empty()) {
+        set_status(textf(TextId::StatusVideoPreviewFailedFormat, {{"error", loaded.error}}));
+        return;
+    }
+
+    video_decoded_frame_ = std::move(loaded.decoded);
+    video_decoded_frame_time_ = pending.decode_time_seconds;
+    video_decoded_frame_valid_ = !video_decoded_frame_.empty();
+    result_ = std::move(loaded.processed);
+    rebuild_texture(result_texture_, result_, true);
+    video_.current_time = pending.time_seconds;
+
+    if (edit_session_.preview_dirty()) {
+        request_video_preview(video_.current_time, true);
+    }
+}
+
+void App::update_pending_video_hardware_probe()
+{
+    if (!pending_video_hardware_probe_) {
+        return;
+    }
+
+    using namespace std::chrono_literals;
+    if (pending_video_hardware_probe_->result.wait_for(0ms) != std::future_status::ready) {
+        return;
+    }
+
+    PendingVideoHardwareProbeState pending = std::move(*pending_video_hardware_probe_);
+    pending_video_hardware_probe_.reset();
+
+    std::vector<std::string> hardware_encoders;
+    try {
+        hardware_encoders = pending.result.get();
+    } catch (const std::exception& error) {
+        append_runtime_log(std::string("video-export: hardware encoder probe failed: ") + error.what());
+    } catch (...) {
+        append_runtime_log("video-export: hardware encoder probe failed: unknown error");
+    }
+
+    if (document_mode_ != DocumentMode::Video || video_.source.empty()) {
+        return;
+    }
+
+    video_.capabilities.hardware_encoders = std::move(hardware_encoders);
+    video_.hardware_encoders_probed = true;
+    video_.profiles = build_video_export_profiles(video_.capabilities);
+    if (video_export_dialog_ && !video_.profiles.empty()) {
+        video_export_dialog_->selected_profile = std::clamp(
+            video_export_dialog_->selected_profile,
+            0,
+            static_cast<int>(video_.profiles.size()) - 1);
+    }
+}
+
+void App::update_pending_video_export()
+{
+    if (!pending_video_export_) {
+        return;
+    }
+
+    using namespace std::chrono_literals;
+    if (pending_video_export_->result.wait_for(0ms) != std::future_status::ready) {
+        return;
+    }
+
+    PendingVideoExportState pending = std::move(*pending_video_export_);
+    pending_video_export_.reset();
+
+    VideoExportResult result;
+    try {
+        result = pending.result.get();
+    } catch (const std::exception& error) {
+        result.error = error.what();
+    } catch (...) {
+        result.error = "unknown error";
+    }
+
+    if (!result.success) {
+        if (!result.diagnostic_log_path.empty()) {
+            append_runtime_log(std::string("video-export: diagnostics ") + quote_path_for_log(result.diagnostic_log_path));
+        }
+        set_status(textf(TextId::StatusVideoExportFailedFormat, {{"error", result.error.empty() ? "unknown error" : result.error}}));
+        return;
+    }
+
+    std::filesystem::path exported_path = pending.settings.destination_path;
+    if (lowercase_extension(exported_path) != pending.settings.profile.extension) {
+        exported_path.replace_extension(pending.settings.profile.extension);
+    }
+    last_export_path_ = exported_path;
+    std::string message = textf(TextId::StatusVideoExportedFormat, {{"name", exported_path.filename().string()}});
+    if (!result.warning.empty()) {
+        message += " ";
+        message += result.warning;
+    }
+    if (!result.diagnostic_log_path.empty()) {
+        append_runtime_log(std::string("video-export: diagnostics ") + quote_path_for_log(result.diagnostic_log_path));
+    }
+    set_status(std::move(message));
+}
+
 void App::handle_file_command(const FileCommand& command)
 {
     switch (command.kind) {
@@ -3136,6 +3757,9 @@ void App::handle_file_command(const FileCommand& command)
         break;
     case FileCommandKind::OpenModel:
         load_model_from_path(command.path);
+        break;
+    case FileCommandKind::OpenVideo:
+        load_video_from_path(command.path);
         break;
     case FileCommandKind::ImportPalette:
         import_palette_from_path(command.path);
@@ -3151,6 +3775,9 @@ void App::handle_file_command(const FileCommand& command)
         break;
     case FileCommandKind::ExportRaw:
         export_result_to_raw_path(command.path);
+        break;
+    case FileCommandKind::ExportVideo:
+        start_video_export_to_path(command.path);
         break;
     case FileCommandKind::BatchImages:
         add_batch_images(command.paths.empty() ? std::vector<std::filesystem::path>{command.path} : command.paths);
@@ -3184,6 +3811,11 @@ void App::load_document_from_path(const std::filesystem::path& path)
         return;
     }
 
+    if (is_importable_video_path(path)) {
+        load_video_from_path(path);
+        return;
+    }
+
     load_image_from_path(path);
 }
 
@@ -3191,6 +3823,10 @@ void App::load_image_from_path(const std::filesystem::path& path)
 {
     if (pending_model_load_) {
         set_status(text(TextId::StatusModelStillLoading));
+        return;
+    }
+    if (pending_video_export_) {
+        set_status(text(TextId::StatusVideoExportAlreadyRunning));
         return;
     }
 
@@ -3201,6 +3837,7 @@ void App::load_image_from_path(const std::filesystem::path& path)
     }
 
     clear_model_document();
+    clear_video_document();
     document_mode_ = DocumentMode::Image;
     original_ = std::move(loaded.image);
     current_image_path_ = path;
@@ -3217,6 +3854,10 @@ void App::load_model_from_path(const std::filesystem::path& path)
     if (pending_model_load_) {
         append_runtime_log("model-load: rejected because another load is pending");
         set_status(text(TextId::StatusModelStillLoading));
+        return;
+    }
+    if (pending_video_export_) {
+        set_status(text(TextId::StatusVideoExportAlreadyRunning));
         return;
     }
 
@@ -3271,6 +3912,7 @@ void App::finish_model_load_from_path(const std::filesystem::path& path, ModelLo
 
     append_runtime_log("model-load: clearing existing document");
     clear_model_document();
+    clear_video_document();
     destroy_texture(original_texture_);
     destroy_texture(result_texture_);
     original_ = {};
@@ -3319,10 +3961,188 @@ void App::finish_model_load_from_path(const std::filesystem::path& path, ModelLo
     append_runtime_log("model-load: finish complete");
 }
 
+void App::load_video_from_path(const std::filesystem::path& path)
+{
+    if (pending_model_load_) {
+        set_status(text(TextId::StatusModelStillLoading));
+        return;
+    }
+    if (pending_video_export_) {
+        set_status(text(TextId::StatusVideoExportAlreadyRunning));
+        return;
+    }
+
+    VideoToolchain tools = find_video_toolchain();
+    if (!tools.available()) {
+        set_status(textf(TextId::StatusVideoToolsMissingFormat, {{"error", tools.error}}));
+        return;
+    }
+
+    std::string error;
+    VideoMetadata metadata = probe_video_metadata(tools, path, error);
+    if (!error.empty()) {
+        set_status(textf(TextId::StatusVideoLoadFailedFormat, {{"error", error}}));
+        return;
+    }
+
+    VideoCapabilities capabilities = probe_video_capabilities(tools, error);
+    if (!error.empty()) {
+        set_status(textf(TextId::StatusVideoLoadFailedFormat, {{"error", error}}));
+        return;
+    }
+
+    clear_model_document();
+    clear_video_document();
+    destroy_texture(original_texture_);
+    destroy_texture(result_texture_);
+    original_ = {};
+    result_ = {};
+
+    document_mode_ = DocumentMode::Video;
+    video_ = {};
+    video_.source = path;
+    video_.tools = std::move(tools);
+    video_.metadata = std::move(metadata);
+    video_.capabilities = std::move(capabilities);
+    video_.profiles = build_video_export_profiles(video_.capabilities);
+    video_.current_time = 0.0;
+    video_.last_tick = std::chrono::steady_clock::now();
+    std::string playback_error;
+    video_.playback_decoder_available = video_playback_decoder_.open(path, playback_error);
+    video_.playback_seek_pending = true;
+    video_.playback_warning_reported = false;
+    if (!video_.playback_decoder_available && !playback_error.empty()) {
+        append_runtime_log(std::string("video-playback: native decoder unavailable: ") + playback_error);
+    }
+    current_image_path_ = path;
+    viewport_mode_ = ViewportMode::Single;
+    result_zoom_ = 1.0F;
+    edit_session_.cancel_live_edit();
+
+    request_video_preview(0.0, true);
+
+    std::string message = textf(TextId::StatusVideoLoadedFormat, {{"name", path.filename().string()}});
+    if (video_.profiles.empty()) {
+        message += " ";
+        message += text(TextId::StatusVideoNoExportProfiles);
+    }
+    set_status(std::move(message));
+}
+
+void App::request_video_preview(double time_seconds, bool force)
+{
+    if (document_mode_ != DocumentMode::Video || video_.source.empty()) {
+        return;
+    }
+
+    video_.current_time = std::clamp(time_seconds, 0.0, std::max(0.0, video_.metadata.duration_seconds));
+    double decode_time = video_.current_time;
+    if (video_.metadata.duration_seconds > 0.0 && video_.metadata.fps > 0.0) {
+        const double last_frame_time = std::max(0.0, video_.metadata.duration_seconds - (0.5 / video_.metadata.fps));
+        decode_time = std::min(decode_time, last_frame_time);
+    }
+    if (pending_video_preview_) {
+        if (force) {
+            ++video_.preview_generation;
+            edit_session_.mark_dirty();
+        }
+        return;
+    }
+
+    constexpr double kFrameTimeEpsilon = 0.000001;
+    if (video_decoded_frame_valid_ && std::abs(video_decoded_frame_time_ - decode_time) <= kFrameTimeEpsilon) {
+        result_ = collapse_pixel_blocks(process_image(video_decoded_frame_, edit_session_.settings()), edit_session_.settings().pixel_size);
+        rebuild_texture(result_texture_, result_, true);
+        edit_session_.clear_preview_dirty();
+        return;
+    }
+
+    if (decode_video_preview_with_playback_decoder(video_.current_time, decode_time)) {
+        return;
+    }
+
+    const std::uint64_t generation = ++video_.preview_generation;
+    const VideoToolchain tools = video_.tools;
+    const VideoMetadata metadata = video_.metadata;
+    const std::filesystem::path source = video_.source;
+    const ProcessSettings settings = edit_session_.settings();
+    const double requested_time = video_.current_time;
+
+    PendingVideoPreviewState pending;
+    pending.time_seconds = requested_time;
+    pending.decode_time_seconds = decode_time;
+    pending.generation = generation;
+    pending.result = std::async(std::launch::async, [tools, metadata, source, settings, decode_time]() {
+        VideoPreviewResult result;
+        std::string error;
+        result.decoded = decode_video_frame_rgba(tools, source, metadata, decode_time, error);
+        if (!error.empty()) {
+            result.error = error;
+            return result;
+        }
+        result.processed = collapse_pixel_blocks(process_image(result.decoded, settings), settings.pixel_size);
+        return result;
+    });
+    pending_video_preview_ = std::move(pending);
+    edit_session_.clear_preview_dirty();
+}
+
+void App::start_video_export_to_path(const std::filesystem::path& path)
+{
+    if (document_mode_ != DocumentMode::Video || video_.source.empty()) {
+        set_status(text(TextId::StatusVideoExportSkipped));
+        return;
+    }
+    if (!video_export_dialog_) {
+        set_status(text(TextId::StatusVideoExportSkipped));
+        return;
+    }
+    if (pending_video_export_) {
+        set_status(text(TextId::StatusVideoExportAlreadyRunning));
+        return;
+    }
+
+    int profile_index = video_export_dialog_->selected_profile;
+    if (profile_index < 0 || profile_index >= static_cast<int>(video_.profiles.size())) {
+        profile_index = 0;
+    }
+    if (video_.profiles.empty()) {
+        set_status(text(TextId::StatusVideoNoExportProfiles));
+        return;
+    }
+
+    VideoExportSettings settings;
+    settings.profile = video_.profiles[static_cast<std::size_t>(profile_index)];
+    settings.metadata = video_.metadata;
+    settings.source_path = video_.source;
+    settings.destination_path = path;
+    settings.process_settings = edit_session_.settings();
+    settings.crf = video_export_dialog_->crf;
+    settings.bitrate_mbps = video_export_dialog_->bitrate_mbps;
+    settings.hardware_speed = video_export_dialog_->hardware_speed;
+    settings.copy_audio = video_export_dialog_->copy_audio;
+
+    PendingVideoExportState pending;
+    pending.settings = settings;
+    pending.progress = std::make_shared<VideoExportProgress>();
+    pending.started_at = std::chrono::steady_clock::now();
+    const VideoToolchain tools = video_.tools;
+    pending.result = std::async(std::launch::async, [tools, settings, progress = pending.progress]() {
+        return export_video_exact(tools, settings, progress);
+    });
+    video_.playing = false;
+    pending_video_export_ = std::move(pending);
+    set_status(textf(TextId::StatusVideoExportStartedFormat, {{"profile", settings.profile.label}}));
+}
+
 void App::close_current_file()
 {
     if (pending_model_load_) {
         set_status(text(TextId::StatusModelStillLoading));
+        return;
+    }
+    if (pending_video_export_) {
+        set_status(text(TextId::StatusVideoExportAlreadyRunning));
         return;
     }
     if (!has_current_file()) {
@@ -3330,9 +4150,11 @@ void App::close_current_file()
     }
 
     const bool was_model = document_mode_ == DocumentMode::Model;
-    append_runtime_log(was_model ? "document: closing model file" : "document: closing image file");
+    const bool was_video = document_mode_ == DocumentMode::Video;
+    append_runtime_log(was_model ? "document: closing model file" : (was_video ? "document: closing video file" : "document: closing image file"));
 
     clear_model_document();
+    clear_video_document();
     destroy_texture(original_texture_);
     destroy_texture(result_texture_);
     original_ = {};
@@ -3346,7 +4168,7 @@ void App::close_current_file()
     edit_session_.cancel_live_edit();
     edit_session_.clear_preview_dirty();
 
-    if (was_model) {
+    if (was_model || was_video) {
         viewport_mode_ = ViewportMode::Single;
         viewport_layout_ = ViewportLayout::SideBySide;
         viewport_split_ratio_ = 0.5F;
@@ -4034,6 +4856,39 @@ void App::clear_model_document()
     append_runtime_log("model-doc: clear complete");
 }
 
+void App::clear_video_document()
+{
+    video_.playing = false;
+    video_playback_decoder_.close();
+    if (pending_video_export_ && pending_video_export_->progress) {
+        pending_video_export_->progress->cancel_requested = true;
+        try {
+            (void)pending_video_export_->result.get();
+        } catch (...) {
+        }
+        pending_video_export_.reset();
+    }
+    if (pending_video_preview_) {
+        try {
+            (void)pending_video_preview_->result.get();
+        } catch (...) {
+        }
+        pending_video_preview_.reset();
+    }
+    if (pending_video_hardware_probe_) {
+        try {
+            (void)pending_video_hardware_probe_->result.get();
+        } catch (...) {
+        }
+        pending_video_hardware_probe_.reset();
+    }
+    video_export_dialog_.reset();
+    video_decoded_frame_ = {};
+    video_decoded_frame_time_ = 0.0;
+    video_decoded_frame_valid_ = false;
+    video_ = {};
+}
+
 void App::reset_model_camera()
 {
     model_yaw_ = 0.65F;
@@ -4176,7 +5031,13 @@ int App::matching_palette_index(const ProcessSettings& settings) const
 
 bool App::has_current_file() const noexcept
 {
-    return document_mode_ == DocumentMode::Model ? !model_.empty() : !original_.empty();
+    if (document_mode_ == DocumentMode::Model) {
+        return !model_.empty();
+    }
+    if (document_mode_ == DocumentMode::Video) {
+        return !video_.source.empty();
+    }
+    return !original_.empty();
 }
 
 bool App::select_preset_by_path(const std::filesystem::path& path)
@@ -4241,6 +5102,7 @@ FileDialogLabels App::file_dialog_labels() const
     return {
         text(TextId::ImagesFilter),
         text(TextId::ModelsFilter),
+        text(TextId::VideosFilter),
         text(TextId::AllFilesFilter),
         text(TextId::LospecPalettesFilter),
         text(TextId::PngImageFilter),

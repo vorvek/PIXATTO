@@ -2,7 +2,7 @@
 
 [![Release](https://github.com/vorvek/PIXATTO/actions/workflows/release.yml/badge.svg)](https://github.com/vorvek/PIXATTO/actions/workflows/release.yml)
 
-PIXATTO is a desktop texture tool for turning images and 3D model textures into pseudo-pixel art. It runs on Windows, Linux, and macOS, and is written in C++20 with SDL3, OpenGL, and Dear ImGui.
+PIXATTO is a desktop texture tool for turning images, videos, and 3D model textures into pseudo-pixel art. It runs on Windows, Linux, and macOS, and is written in C++20 with SDL3, OpenGL, and Dear ImGui.
 
 | Image workflow | 3D model texture workflow |
 | --- | --- |
@@ -12,9 +12,10 @@ PIXATTO is a desktop texture tool for turning images and 3D model textures into 
 
 PIXATTO keeps the editing loop simple: import an asset, tune the pixelization, palette, dithering, and adjustment controls, preview the result live, then export the processed output. Reusable presets and batch image processing are available when the same look needs to be applied again.
 
-It supports standalone images and model texture workflows:
+It supports standalone images, videos, and model texture workflows:
 
 - Images: PNG, JPG/JPEG, BMP, TGA, GIF, WebP, JPEG XL, QOI, TIFF, and PNM/PPM/PGM/PBM.
+- Videos: MP4, MOV, MKV, WebM, AVI, M4V, MPG/MPEG, and OGV through an external FFmpeg/ffprobe installation.
 - 3D models: GLB, glTF, OBJ, FBX, and DAE.
 - Palettes: Lospec `.hex` files, bundled default palettes, and custom palettes made in the app.
 
@@ -34,6 +35,27 @@ Features include:
 - Undo and redo for processing edits.
 - Independent zoom for original and result previews.
 - Direct numeric entry by double-clicking numeric controls.
+
+## Video Workflow
+
+Video imports switch PIXATTO into video mode. The app shows one converted viewport with a timeline, play/pause control, scrubber, timecode, frame counter, and export progress.
+
+Video mode uses external `ffmpeg` and `ffprobe`:
+
+- On Windows, PIXATTO looks next to `pixatto.exe` first, then on `PATH`.
+- On Linux and macOS, PIXATTO looks on `PATH`.
+- PIXATTO does not bundle FFmpeg binaries.
+
+Scrubbed and paused frames are decoded, processed with the current settings, collapsed to one output pixel per pixelization block, and uploaded as the preview texture. Export streams decoded frames through PIXATTO and into an FFmpeg encoder, so the exported frames use the exact CPU processing path.
+
+On Windows, timeline playback uses Media Foundation for native preview decoding instead of launching FFmpeg for every displayed frame. Linux and macOS native playback backends are planned; until then, unsupported preview decode falls back to still-frame updates.
+
+Available export profiles depend on the detected FFmpeg build:
+
+- Software: MP4/H.264, MP4/H.265, WebM/VP9, MKV/AV1, and MKV/FFV1 lossless when the matching encoders and muxers are available.
+- Hardware: NVIDIA NVENC and AMD AMF H.264/H.265/AV1 profiles when those FFmpeg encoders are present.
+
+Hardware profiles expose speed presets and bitrate controls. They are intended for faster exports and may need a higher bitrate for similar quality.
 
 ## 3D Model Texture Workflow
 
@@ -75,6 +97,8 @@ PNG export writes indexed 8-bit PNGs when the result fits in 256 palette entries
 Exported image dimensions use one output pixel per pixelization block, so a source image becomes `ceil(width / Pixel Size)` by `ceil(height / Pixel Size)`.
 
 `Export... > Export Raw` is available for images. It writes an 8-bit indexed `.raw` file, a shared `.pal` palette sidecar, and an optional `.msk` transparency mask.
+
+`Export... > Export Video` is available in video mode. It writes constant-frame-rate output using the probed average FPS, copies the first compatible audio stream by default, and omits audio with a warning when the selected container cannot copy the source codec. Profiles that require even dimensions pad odd processed output sizes before encoding.
 
 ## Downloads
 
@@ -136,7 +160,7 @@ bool transparent = mask && (mask[i / 8] & (0x80 >> (i & 7)));
 
 ## Dependencies
 
-The build statically links SDL3 `release-3.4.4`, SDL_image `release-3.4.2`, Dear ImGui `v1.92.7`, stb image libraries, tinygltf `v2.9.7`, tinyobjloader `v2.0.0rc13`, ufbx `v0.21.3`, and tinyxml2 `11.0.0`. See [THIRD_PARTY.md](THIRD_PARTY.md) for license notes.
+The build statically links SDL3 `release-3.4.4`, SDL_image `release-3.4.2`, Dear ImGui `v1.92.7`, stb image libraries, tinygltf `v2.9.7`, tinyobjloader `v2.0.0rc13`, ufbx `v0.21.3`, and tinyxml2 `11.0.0`. Video import/export uses external FFmpeg and ffprobe executables; they are not redistributed with PIXATTO. See [THIRD_PARTY.md](THIRD_PARTY.md) for license notes.
 
 ## License
 

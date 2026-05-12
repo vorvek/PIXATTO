@@ -11,6 +11,8 @@ PIXATTO fetches these dependencies at configure time and links them into the des
 - ufbx `v0.21.3` from `ufbx/ufbx`, using its MIT license option.
 - tinyxml2 `11.0.0` from `leethomason/tinyxml2`, under the zlib license.
 
+Video import and export are implemented through user-provided external `ffmpeg` and `ffprobe` executables. PIXATTO does not bundle or redistribute FFmpeg binaries, including GPL-enabled builds.
+
 SDL_image is configured with vendored permissive codec libraries for extended imports:
 
 - libwebp `1.3.2-SDL`, under its BSD-style license.

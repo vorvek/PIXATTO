@@ -1,6 +1,7 @@
 #include "pixatto/file_command_pump.hpp"
 
 #include "pixatto/image_formats.hpp"
+#include "pixatto/video_backend.hpp"
 
 #include <SDL3/SDL_dialog.h>
 #include <SDL3/SDL_error.h>
@@ -159,6 +160,16 @@ bool FileCommandPump::request_open_model_dialog(SDL_Window* window, const FileDi
         false);
 }
 
+bool FileCommandPump::request_open_video_dialog(SDL_Window* window, const FileDialogLabels& labels)
+{
+    return request_dialog(
+        window,
+        FileCommandKind::OpenVideo,
+        {labels.videos_filter, labels.all_files_filter},
+        {std::string(kImportableVideoDialogPattern), "*"},
+        false);
+}
+
 bool FileCommandPump::request_import_palette_dialog(SDL_Window* window, const FileDialogLabels& labels)
 {
     return request_dialog(
@@ -207,6 +218,25 @@ bool FileCommandPump::request_export_raw_dialog(SDL_Window* window, const FileDi
         true);
 }
 
+bool FileCommandPump::request_export_video_dialog(
+    SDL_Window* window,
+    std::string filter_name,
+    std::string filter_pattern,
+    const std::filesystem::path& default_path,
+    int profile_index)
+{
+    return request_dialog(
+        window,
+        FileCommandKind::ExportVideo,
+        {std::move(filter_name)},
+        {std::move(filter_pattern)},
+        true,
+        false,
+        false,
+        default_path,
+        profile_index);
+}
+
 bool FileCommandPump::request_batch_images_dialog(SDL_Window* window, const FileDialogLabels& labels)
 {
     return request_dialog(
@@ -246,6 +276,12 @@ void FileCommandPump::submit_drop(std::filesystem::path path, bool has_open_docu
     if (is_model_path(path)) {
         queued_commands_.push_back(
             {has_open_document ? FileCommandKind::ConfirmOpenImage : FileCommandKind::OpenModel, std::move(path), {}, {}});
+        return;
+    }
+
+    if (is_importable_video_path(path)) {
+        queued_commands_.push_back(
+            {has_open_document ? FileCommandKind::ConfirmOpenImage : FileCommandKind::OpenVideo, std::move(path), {}, {}});
         return;
     }
 

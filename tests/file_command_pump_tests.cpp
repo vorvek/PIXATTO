@@ -71,6 +71,30 @@ void dropped_model_requires_confirmation_when_document_is_loaded()
     require(commands[0].path == "models/hero.obj");
 }
 
+void dropped_video_opens_when_no_document_is_loaded()
+{
+    pixatto::FileCommandPump pump;
+
+    pump.submit_drop("videos/clip.MP4", false);
+    const auto commands = pump.drain_commands();
+
+    require(commands.size() == 1U);
+    require(commands[0].kind == pixatto::FileCommandKind::OpenVideo);
+    require(commands[0].path == "videos/clip.MP4");
+}
+
+void dropped_video_requires_confirmation_when_document_is_loaded()
+{
+    pixatto::FileCommandPump pump;
+
+    pump.submit_drop("videos/replacement.webm", true);
+    const auto commands = pump.drain_commands();
+
+    require(commands.size() == 1U);
+    require(commands[0].kind == pixatto::FileCommandKind::ConfirmOpenImage);
+    require(commands[0].path == "videos/replacement.webm");
+}
+
 void empty_drop_is_ignored()
 {
     pixatto::FileCommandPump pump;
@@ -109,6 +133,8 @@ int main()
     dropped_image_requires_confirmation_when_image_is_loaded();
     dropped_model_opens_when_no_document_is_loaded();
     dropped_model_requires_confirmation_when_document_is_loaded();
+    dropped_video_opens_when_no_document_is_loaded();
+    dropped_video_requires_confirmation_when_document_is_loaded();
     empty_drop_is_ignored();
     unsupported_drop_is_ignored();
     drain_clears_queued_commands();

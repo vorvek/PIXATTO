@@ -261,6 +261,63 @@ void added_dither_modes_create_two_tone_patterns()
     }
 }
 
+void collapsed_processing_matches_full_processing_sampled()
+{
+    const pixatto::Image source = {
+        5,
+        4,
+        {
+            255, 0, 0, 255,      0, 255, 0, 255,      0, 0, 255, 255,      255, 255, 0, 255,   255, 0, 255, 255,
+            12, 34, 56, 255,     78, 90, 123, 255,    200, 170, 40, 255,   80, 30, 220, 255,   20, 240, 160, 255,
+            5, 10, 15, 127,      40, 80, 120, 255,    90, 130, 170, 255,   140, 180, 220, 255, 255, 255, 255, 255,
+            220, 120, 20, 255,   180, 40, 160, 255,   64, 64, 64, 255,     8, 220, 140, 255,   0, 0, 0, 0,
+        },
+    };
+
+    std::vector<pixatto::ProcessSettings> settings_cases;
+
+    pixatto::ProcessSettings adjusted;
+    adjusted.pixel_size = 2;
+    adjusted.color_levels = 4;
+    adjusted.adjustments.brightness = 0.05F;
+    adjusted.adjustments.gamma = 1.2F;
+    settings_cases.push_back(adjusted);
+
+    pixatto::ProcessSettings paletted = adjusted;
+    paletted.use_palette = true;
+    paletted.palette = {
+        {0, 0, 0, 255},
+        {255, 255, 255, 255},
+        {255, 0, 0, 255},
+        {0, 0, 255, 255},
+    };
+    paletted.dither_mode = pixatto::DitherMode::Bayer;
+    paletted.dither_amount = 0.6F;
+    settings_cases.push_back(paletted);
+
+    pixatto::ProcessSettings reduced = adjusted;
+    reduced.pixel_size = 3;
+    reduced.reduction_max_colors = 3;
+    settings_cases.push_back(reduced);
+
+    pixatto::ProcessSettings diffusion = paletted;
+    diffusion.dither_mode = pixatto::DitherMode::Atkinson;
+    diffusion.dither_amount = 0.7F;
+    settings_cases.push_back(diffusion);
+
+    pixatto::ProcessSettings riemersma = paletted;
+    riemersma.dither_mode = pixatto::DitherMode::Riemersma;
+    riemersma.dither_amount = 0.5F;
+    settings_cases.push_back(riemersma);
+
+    for (const pixatto::ProcessSettings& settings : settings_cases) {
+        const pixatto::Image full = pixatto::process_image(source, settings);
+        const pixatto::Image sampled = pixatto::collapse_pixel_blocks(full, settings.pixel_size);
+        const pixatto::Image direct = pixatto::process_image_collapsed(source, settings);
+        require_same_image(sampled, direct);
+    }
+}
+
 } // namespace
 
 int main()
@@ -270,5 +327,6 @@ int main()
     collapsed_pixel_blocks_use_one_pixel_per_block();
     paletted_riemersma_outputs_palette_colors();
     added_dither_modes_create_two_tone_patterns();
+    collapsed_processing_matches_full_processing_sampled();
     return 0;
 }

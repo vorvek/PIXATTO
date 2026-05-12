@@ -16,10 +16,12 @@ struct FileCommandPumpDialogState;
 enum class FileCommandKind {
     OpenImage,
     OpenModel,
+    OpenVideo,
     ImportPalette,
     ExportPng,
     ExportModelTexturePng,
     ExportRaw,
+    ExportVideo,
     BatchImages,
     BatchOutputFolder,
     ConfirmOpenImage,
@@ -38,6 +40,7 @@ struct FileCommand {
 struct FileDialogLabels {
     std::string images_filter;
     std::string models_filter;
+    std::string videos_filter;
     std::string all_files_filter;
     std::string lospec_palettes_filter;
     std::string png_image_filter;
@@ -55,6 +58,7 @@ public:
     [[nodiscard]] bool dialog_open() const noexcept;
     [[nodiscard]] bool request_open_image_dialog(SDL_Window* window, const FileDialogLabels& labels);
     [[nodiscard]] bool request_open_model_dialog(SDL_Window* window, const FileDialogLabels& labels);
+    [[nodiscard]] bool request_open_video_dialog(SDL_Window* window, const FileDialogLabels& labels);
     [[nodiscard]] bool request_import_palette_dialog(SDL_Window* window, const FileDialogLabels& labels);
     [[nodiscard]] bool request_export_png_dialog(SDL_Window* window, const FileDialogLabels& labels);
     [[nodiscard]] bool request_export_model_texture_png_dialog(
@@ -63,6 +67,12 @@ public:
         const std::filesystem::path& default_path,
         int texture_index);
     [[nodiscard]] bool request_export_raw_dialog(SDL_Window* window, const FileDialogLabels& labels);
+    [[nodiscard]] bool request_export_video_dialog(
+        SDL_Window* window,
+        std::string filter_name,
+        std::string filter_pattern,
+        const std::filesystem::path& default_path,
+        int profile_index);
     [[nodiscard]] bool request_batch_images_dialog(SDL_Window* window, const FileDialogLabels& labels);
     [[nodiscard]] bool request_batch_output_folder_dialog(SDL_Window* window, const std::filesystem::path& default_path);
 

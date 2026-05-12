@@ -74,6 +74,7 @@ struct ProcessSettings {
 };
 
 Image process_image(const Image& source, const ProcessSettings& settings);
+Image process_image_collapsed(const Image& source, const ProcessSettings& settings);
 Image collapse_pixel_blocks(const Image& image, int pixel_size);
 
 } // namespace pixatto

@@ -203,6 +203,12 @@ endif()
 
 message(STATUS "Pixatto SDL target: ${PIXATTO_SDL_TARGET}")
 
+function(pixatto_link_platform_video_playback target)
+    if(WIN32)
+        target_link_libraries(${target} PRIVATE mfplat mfreadwrite mfuuid ole32)
+    endif()
+endfunction()
+
 add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
@@ -257,6 +263,8 @@ set(PIXATTO_APP_SOURCES
     src/palette.cpp
     src/preset.cpp
     src/processing_edit_session.cpp
+    src/video_backend.cpp
+    src/video_playback_decoder.cpp
     src/vendor/stb_impl.cpp
 )
 
@@ -293,6 +301,7 @@ target_link_libraries(pixatto
         ufbx
         tinyxml2
 )
+pixatto_link_platform_video_playback(pixatto)
 
 if(TARGET SDL3-static)
     pixatto_enable_release_sections(SDL3-static)
@@ -341,16 +350,22 @@ add_test(NAME processing_edit_session COMMAND pixatto_processing_edit_session_te
 add_executable(pixatto_file_command_pump_tests
     tests/file_command_pump_tests.cpp
     src/file_command_pump.cpp
+    src/image_io.cpp
+    src/image_processing.cpp
+    src/video_backend.cpp
+    src/vendor/stb_impl.cpp
 )
 
 target_include_directories(pixatto_file_command_pump_tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${stb_SOURCE_DIR}
 )
 
 target_link_libraries(pixatto_file_command_pump_tests
     PRIVATE
         ${PIXATTO_SDL_TARGET}
+        SDL3_image::SDL3_image
 )
 
 if(MSVC)
@@ -360,6 +375,65 @@ else()
 endif()
 
 add_test(NAME file_command_pump COMMAND pixatto_file_command_pump_tests)
+
+add_executable(pixatto_video_backend_tests
+    tests/video_backend_tests.cpp
+    src/image_io.cpp
+    src/image_processing.cpp
+    src/video_backend.cpp
+    src/vendor/stb_impl.cpp
+)
+
+target_include_directories(pixatto_video_backend_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${stb_SOURCE_DIR}
+)
+
+target_link_libraries(pixatto_video_backend_tests
+    PRIVATE
+        ${PIXATTO_SDL_TARGET}
+        SDL3_image::SDL3_image
+)
+
+if(MSVC)
+    target_compile_options(pixatto_video_backend_tests PRIVATE /W4 /permissive- /utf-8)
+else()
+    target_compile_options(pixatto_video_backend_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME video_backend COMMAND pixatto_video_backend_tests)
+
+add_executable(pixatto_video_ffmpeg_integration_tests
+    tests/video_ffmpeg_integration_tests.cpp
+    src/image_io.cpp
+    src/image_processing.cpp
+    src/video_backend.cpp
+    src/video_playback_decoder.cpp
+    src/vendor/stb_impl.cpp
+)
+
+target_include_directories(pixatto_video_ffmpeg_integration_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${stb_SOURCE_DIR}
+)
+
+target_link_libraries(pixatto_video_ffmpeg_integration_tests
+    PRIVATE
+        ${PIXATTO_SDL_TARGET}
+        SDL3_image::SDL3_image
+)
+pixatto_link_platform_video_playback(pixatto_video_ffmpeg_integration_tests)
+
+if(MSVC)
+    target_compile_options(pixatto_video_ffmpeg_integration_tests PRIVATE /W4 /permissive- /utf-8)
+else()
+    target_compile_options(pixatto_video_ffmpeg_integration_tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_test(NAME video_ffmpeg_integration COMMAND pixatto_video_ffmpeg_integration_tests)
+set_tests_properties(video_ffmpeg_integration PROPERTIES SKIP_RETURN_CODE 77)
 
 add_executable(pixatto_image_io_tests
     tests/image_io_tests.cpp
