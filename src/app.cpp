@@ -262,7 +262,7 @@ TextId video_hardware_speed_text(VideoHardwareSpeed speed)
     return TextId::VideoHardwareSpeedBalanced;
 }
 
-bool video_low_quality_process_allowed(const ProcessSettings& settings)
+bool video_gpu_processing_allowed(const ProcessSettings& settings)
 {
     return can_process_sampled_collapsed_on_gpu(settings);
 }
@@ -3190,21 +3190,21 @@ void App::render_video_export_dialog()
                 ImGui::TextDisabled("%s", text(TextId::VideoAudioIncompatible));
             }
 
-            const bool can_low_quality_process = video_low_quality_process_allowed(edit_session_.settings());
-            if (!can_low_quality_process) {
-                video_export_dialog_->high_quality_process = true;
+            const bool can_gpu_process = video_gpu_processing_allowed(edit_session_.settings());
+            if (!can_gpu_process) {
+                video_export_dialog_->gpu_processing = false;
                 ImGui::BeginDisabled();
             }
             ImGui::Checkbox(
-                imgui_label(TextId::VideoHighQualityProcess, "VideoHighQualityProcess").c_str(),
-                &video_export_dialog_->high_quality_process);
-            if (!can_low_quality_process) {
+                imgui_label(TextId::VideoGpuProcessing, "VideoGpuProcessing").c_str(),
+                &video_export_dialog_->gpu_processing);
+            if (!can_gpu_process) {
                 ImGui::EndDisabled();
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                     ImGui::SetTooltip("%s", text(TextId::VideoCpuRequiredProcessHint));
                 }
             } else if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", text(TextId::VideoHighQualityProcessHint));
+                ImGui::SetTooltip("%s", text(TextId::VideoGpuProcessingHint));
             }
 
             const VideoDimensions dimensions = video_export_dimensions(video_.metadata, edit_session_.settings().pixel_size, active_profile);
@@ -4429,10 +4429,10 @@ void App::start_video_export_to_path(const std::filesystem::path& path)
     settings.crf = video_export_dialog_->crf;
     settings.qp = video_export_dialog_->qp;
     settings.hardware_speed = video_export_dialog_->hardware_speed;
-    settings.high_quality_process = video_export_dialog_->high_quality_process;
+    settings.gpu_processing = video_export_dialog_->gpu_processing;
 
     PendingVideoExportState pending;
-    if (!settings.high_quality_process && can_process_sampled_collapsed_on_gpu(settings.process_settings)) {
+    if (settings.gpu_processing && can_process_sampled_collapsed_on_gpu(settings.process_settings)) {
         pending.gpu_queue = std::make_shared<VideoExportGpuQueue>();
         auto gpu_disabled = std::make_shared<std::atomic_bool>(false);
         // The export worker owns the source image until this callback returns.

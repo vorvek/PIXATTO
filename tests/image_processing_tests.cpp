@@ -2,6 +2,7 @@
 #include "pixatto/gpu_image_processor.hpp"
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_opengl.h>
 
 #include <stdexcept>
 #include <iostream>
@@ -353,22 +354,61 @@ void sampled_collapsed_processing_is_the_low_quality_path()
 
 void gpu_sampled_processor_capability_matches_shader_scope()
 {
+    const std::vector<pixatto::DitherMode> stateless_modes = {
+        pixatto::DitherMode::None,
+        pixatto::DitherMode::Bayer,
+        pixatto::DitherMode::BlueNoise,
+        pixatto::DitherMode::ClusterDot4x4,
+        pixatto::DitherMode::ClusterDot8x8,
+        pixatto::DitherMode::Horizontal2x2,
+        pixatto::DitherMode::Horizontal8x1,
+        pixatto::DitherMode::Horizontal12x4,
+        pixatto::DitherMode::Vertical2x2,
+        pixatto::DitherMode::Vertical1x8,
+        pixatto::DitherMode::Vertical4x12,
+        pixatto::DitherMode::Diagonal5x5,
+    };
+
     pixatto::ProcessSettings settings;
-    settings.dither_mode = pixatto::DitherMode::Bayer;
     settings.dither_amount = 0.5F;
-    require(pixatto::can_process_sampled_collapsed_on_gpu(settings));
+    for (const pixatto::DitherMode mode : stateless_modes) {
+        settings.dither_mode = mode;
+        require(pixatto::supports_low_quality_process(settings));
+        require(pixatto::can_process_sampled_collapsed_on_gpu(settings));
+    }
 
-    settings.dither_mode = pixatto::DitherMode::BlueNoise;
-    require(!pixatto::can_process_sampled_collapsed_on_gpu(settings));
+    for (const pixatto::DitherMode mode : {
+             pixatto::DitherMode::FloydSteinberg,
+             pixatto::DitherMode::FalseFloydSteinberg,
+             pixatto::DitherMode::FilterLite,
+             pixatto::DitherMode::ZhigangFan,
+             pixatto::DitherMode::ShiauFan,
+             pixatto::DitherMode::JarvisJudiceNinke,
+             pixatto::DitherMode::Atkinson,
+             pixatto::DitherMode::Stucki,
+             pixatto::DitherMode::Burkes,
+             pixatto::DitherMode::Sierra,
+             pixatto::DitherMode::TwoRowSierra,
+             pixatto::DitherMode::Riemersma,
+         }) {
+        settings.dither_mode = mode;
+        require(!pixatto::supports_low_quality_process(settings));
+        require(!pixatto::can_process_sampled_collapsed_on_gpu(settings));
+    }
 
-    settings.dither_amount = 0.0F;
-    require(pixatto::can_process_sampled_collapsed_on_gpu(settings));
-
+    settings.dither_mode = pixatto::DitherMode::Bayer;
     settings.use_palette = true;
     settings.palette = {{0, 0, 0, 255}, {255, 255, 255, 255}};
+    require(pixatto::can_process_sampled_collapsed_on_gpu(settings));
+
+    settings.palette.clear();
+    require(!pixatto::can_process_sampled_collapsed_on_gpu(settings));
+
+    settings.palette.assign(257U, {0, 0, 0, 255});
     require(!pixatto::can_process_sampled_collapsed_on_gpu(settings));
 
     settings.use_palette = false;
+    settings.palette.clear();
     settings.reduction_max_colors = 4;
     require(!pixatto::can_process_sampled_collapsed_on_gpu(settings));
 }
@@ -454,11 +494,10 @@ void gpu_sampled_processor_matches_cpu_when_context_is_available()
             require_gpu_matches_cpu(processor, source, settings);
         }
 
-        {
-            pixatto::Image source;
-            source.width = 5;
-            source.height = 3;
-            source.rgba = {
+        const pixatto::Image ordered_source = {
+            5,
+            3,
+            {
                 12, 36, 72, 255,
                 36, 72, 108, 255,
                 72, 108, 144, 255,
@@ -474,16 +513,120 @@ void gpu_sampled_processor_matches_cpu_when_context_is_available()
                 90, 120, 150, 255,
                 120, 150, 180, 255,
                 150, 180, 210, 255,
-            };
+            },
+        };
 
+        for (const pixatto::DitherMode mode : {
+                 pixatto::DitherMode::Bayer,
+                 pixatto::DitherMode::ClusterDot4x4,
+                 pixatto::DitherMode::ClusterDot8x8,
+                 pixatto::DitherMode::Horizontal2x2,
+                 pixatto::DitherMode::Horizontal8x1,
+                 pixatto::DitherMode::Horizontal12x4,
+                 pixatto::DitherMode::Vertical2x2,
+                 pixatto::DitherMode::Vertical1x8,
+                 pixatto::DitherMode::Vertical4x12,
+                 pixatto::DitherMode::Diagonal5x5,
+             }) {
+            pixatto::ProcessSettings settings;
+            settings.pixel_size = 2;
+            settings.color_levels = 4;
+            settings.dither_mode = mode;
+            settings.dither_amount = 0.5F;
+            settings.bayer_matrix_size = 4;
+
+            require_gpu_matches_cpu(processor, ordered_source, settings);
+        }
+
+        {
+            pixatto::ProcessSettings settings;
+            settings.pixel_size = 2;
+            settings.color_levels = 4;
+            settings.dither_mode = pixatto::DitherMode::BlueNoise;
+            settings.dither_amount = 0.5F;
+            settings.blue_noise_seed = 4242;
+
+            require_gpu_matches_cpu(processor, ordered_source, settings);
+        }
+
+        {
+            pixatto::ProcessSettings settings;
+            settings.pixel_size = 2;
+            settings.color_levels = 8;
+            settings.preserve_transparency = true;
+
+            require_gpu_matches_cpu(processor, ordered_source, settings);
+        }
+
+        {
             pixatto::ProcessSettings settings;
             settings.pixel_size = 2;
             settings.color_levels = 4;
             settings.dither_mode = pixatto::DitherMode::Bayer;
             settings.dither_amount = 0.5F;
-            settings.bayer_matrix_size = 4;
 
-            require_gpu_matches_cpu(processor, source, settings);
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(0, 0, 1, 1);
+            glEnable(GL_CULL_FACE);
+            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+            require_gpu_matches_cpu(processor, ordered_source, settings);
+            require(glIsEnabled(GL_SCISSOR_TEST) == GL_TRUE);
+            require(glIsEnabled(GL_CULL_FACE) == GL_TRUE);
+            GLboolean color_mask[4] = {};
+            glGetBooleanv(GL_COLOR_WRITEMASK, color_mask);
+            require(color_mask[0] == GL_FALSE);
+            require(color_mask[1] == GL_FALSE);
+            require(color_mask[2] == GL_FALSE);
+            require(color_mask[3] == GL_FALSE);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_CULL_FACE);
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        }
+
+        const pixatto::Image palette_source = {
+            7,
+            5,
+            {
+                0, 0, 0, 255,       255, 255, 255, 255, 250, 10, 10, 255,    10, 245, 10, 255,    10, 10, 245, 255,    240, 240, 20, 255,  20, 240, 240, 255,
+                4, 4, 4, 255,       245, 245, 245, 255, 230, 30, 20, 255,    30, 220, 25, 255,    24, 24, 230, 255,    224, 210, 30, 255,  26, 220, 220, 255,
+                0, 0, 0, 0,         250, 250, 250, 255, 220, 20, 40, 255,    20, 235, 40, 255,    40, 20, 220, 255,    235, 235, 35, 255,  35, 235, 235, 255,
+                8, 8, 8, 255,       240, 240, 240, 255, 235, 50, 40, 255,    40, 235, 50, 255,    50, 40, 235, 255,    245, 220, 45, 255,  45, 245, 220, 255,
+                2, 2, 2, 255,       255, 255, 255, 255, 255, 20, 20, 255,    20, 255, 20, 255,    20, 20, 255, 255,    250, 250, 30, 255,  30, 250, 250, 255,
+            },
+        };
+
+        for (const pixatto::DitherMode mode : {
+                 pixatto::DitherMode::None,
+                 pixatto::DitherMode::Bayer,
+                 pixatto::DitherMode::BlueNoise,
+                 pixatto::DitherMode::ClusterDot4x4,
+                 pixatto::DitherMode::ClusterDot8x8,
+                 pixatto::DitherMode::Horizontal2x2,
+                 pixatto::DitherMode::Horizontal8x1,
+                 pixatto::DitherMode::Horizontal12x4,
+                 pixatto::DitherMode::Vertical2x2,
+                 pixatto::DitherMode::Vertical1x8,
+                 pixatto::DitherMode::Vertical4x12,
+                 pixatto::DitherMode::Diagonal5x5,
+             }) {
+            pixatto::ProcessSettings settings;
+            settings.pixel_size = 3;
+            settings.use_palette = true;
+            settings.palette = {
+                {0, 0, 0, 255},
+                {255, 255, 255, 255},
+                {255, 0, 0, 255},
+                {0, 255, 0, 255},
+                {0, 0, 255, 255},
+                {255, 255, 0, 255},
+                {0, 255, 255, 255},
+            };
+            settings.dither_mode = mode;
+            settings.dither_amount = mode == pixatto::DitherMode::None ? 0.0F : 0.35F;
+            settings.bayer_matrix_size = 8;
+            settings.blue_noise_seed = 777;
+
+            require_gpu_matches_cpu(processor, palette_source, settings);
         }
     }
 

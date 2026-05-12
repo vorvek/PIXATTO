@@ -393,6 +393,7 @@ target_include_directories(pixatto_video_backend_tests
         ${PROJECT_SOURCE_DIR}/include
         ${stb_SOURCE_DIR}
 )
+target_compile_definitions(pixatto_video_backend_tests PRIVATE PIXATTO_VIDEO_BACKEND_TEST_HOOKS)
 
 target_link_libraries(pixatto_video_backend_tests
     PRIVATE

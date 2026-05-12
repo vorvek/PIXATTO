@@ -867,8 +867,9 @@ bool process_frame_for_export(
     std::vector<unsigned char>& frame,
     const VideoMetadata& metadata,
     const ProcessSettings& settings,
-    bool high_quality_process,
+    bool gpu_processing,
     const std::function<VideoGpuProcessResult(const Image&, const ProcessSettings&, Image&, std::string&)>& gpu_process,
+    const std::shared_ptr<std::atomic_bool>& gpu_fallback_mode,
     const std::shared_ptr<VideoExportDiagnostics>& diagnostics,
     Image& processed,
     std::string& error)
@@ -879,7 +880,11 @@ bool process_frame_for_export(
     image.height = metadata.height;
     image.rgba = std::move(frame);
 
-    if (!high_quality_process && gpu_process && can_process_sampled_collapsed_on_gpu(settings)) {
+    const bool gpu_supported = gpu_processing && gpu_process && can_process_sampled_collapsed_on_gpu(settings);
+    const bool gpu_fallback_active = gpu_fallback_mode && gpu_fallback_mode->load();
+    bool used_gpu_fallback = gpu_fallback_active;
+
+    if (gpu_supported && !gpu_fallback_active) {
         std::string gpu_error;
         const VideoGpuProcessResult gpu_result = gpu_process(image, settings, processed, gpu_error);
         if (gpu_result == VideoGpuProcessResult::Success) {
@@ -894,15 +899,24 @@ bool process_frame_for_export(
             frame = std::move(image.rgba);
             return false;
         }
+        used_gpu_fallback = true;
         if (diagnostics) {
-            diagnostics->gpu_failures.fetch_add(1);
+            bool first_failure = true;
+            if (gpu_fallback_mode) {
+                first_failure = !gpu_fallback_mode->exchange(true);
+            }
+            if (first_failure) {
+                diagnostics->gpu_failures.fetch_add(1);
+            }
+        } else if (gpu_fallback_mode) {
+            gpu_fallback_mode->store(true);
         }
     }
 
-    processed = high_quality_process
-        ? process_image_collapsed(image, settings)
-        : process_image_sampled_collapsed(image, settings);
-    if (!high_quality_process && gpu_process && can_process_sampled_collapsed_on_gpu(settings) && diagnostics) {
+    processed = gpu_supported
+        ? process_image_sampled_collapsed(image, settings)
+        : process_image_collapsed(image, settings);
+    if (used_gpu_fallback && diagnostics) {
         diagnostics->gpu_fallback_frames.fetch_add(1);
     }
     frame = std::move(image.rgba);
@@ -1059,8 +1073,9 @@ void video_frame_worker(
     VideoFramePipeline& pipeline,
     VideoMetadata metadata,
     ProcessSettings settings,
-    bool high_quality_process,
+    bool gpu_processing,
     std::function<VideoGpuProcessResult(const Image&, const ProcessSettings&, Image&, std::string&)> gpu_process,
+    std::shared_ptr<std::atomic_bool> gpu_fallback_mode,
     int output_width,
     int output_height,
     std::size_t output_frame_bytes,
@@ -1091,7 +1106,16 @@ void video_frame_worker(
         Image processed;
         std::string process_error;
         const bool processed_ok =
-            process_frame_for_export(job.rgba, metadata, settings, high_quality_process, gpu_process, diagnostics, processed, process_error);
+            process_frame_for_export(
+                job.rgba,
+                metadata,
+                settings,
+                gpu_processing,
+                gpu_process,
+                gpu_fallback_mode,
+                diagnostics,
+                processed,
+                process_error);
         release_frame_buffer(source_pool, std::move(job.rgba), diagnostics);
         if (diagnostics) {
             diagnostics->process_ns.fetch_add(
@@ -1722,8 +1746,11 @@ std::string video_export_settings_error(const VideoExportSettings& settings)
         && !settings.capabilities.has_hardware_encoder(settings.profile.encoder)) {
         return "Selected hardware video encoder is not available.";
     }
-    if (!settings.high_quality_process && !can_process_sampled_collapsed_on_gpu(settings.process_settings)) {
-        return "Selected settings require high quality CPU video processing.";
+    if (settings.gpu_processing && !can_process_sampled_collapsed_on_gpu(settings.process_settings)) {
+        return "Selected settings require CPU video processing.";
+    }
+    if (settings.gpu_processing && !settings.gpu_process) {
+        return "GPU video processing requires a GPU process callback.";
     }
     if (!settings.metadata.has_audio || settings.audio_mode == VideoAudioMode::None) {
         return {};
@@ -1870,8 +1897,9 @@ VideoExportResult export_video_exact(
     const std::shared_ptr<VideoExportDiagnostics> diagnostics;
 #endif
     const bool gpu_processing_requested =
-        !settings.high_quality_process && settings.gpu_process && can_process_sampled_collapsed_on_gpu(settings.process_settings);
+        settings.gpu_processing && settings.gpu_process && can_process_sampled_collapsed_on_gpu(settings.process_settings);
     const unsigned int worker_count = gpu_processing_requested ? std::min(4U, video_export_worker_count()) : video_export_worker_count();
+    auto gpu_fallback_mode = std::make_shared<std::atomic_bool>(false);
     const std::size_t pending_queue_limit = video_export_queue_limit(source_frame_bytes, worker_count);
     const std::size_t completed_queue_limit = video_export_queue_limit(output_frame_bytes, worker_count);
     const std::size_t source_pool_limit = video_export_source_pool_limit(source_frame_bytes, worker_count);
@@ -1962,7 +1990,7 @@ VideoExportResult export_video_exact(
                  << ",\"pending_queue_limit\":" << pending_queue_limit
                  << ",\"completed_queue_limit\":" << completed_queue_limit
                  << ",\"source_frame_pool_limit\":" << source_pool_limit
-                 << ",\"high_quality_process\":" << json_bool(settings.high_quality_process)
+                 << ",\"gpu_processing\":" << json_bool(settings.gpu_processing)
                  << ",\"gpu_processing_requested\":" << json_bool(gpu_processing_requested)
                  << ",\"decode_filter\":" << json_string(decode_filter)
                  << ",\"decode_args\":" << json_string_array(decode_args)
@@ -2006,8 +2034,9 @@ VideoExportResult export_video_exact(
         workers.emplace_back([&pipeline,
                               metadata = settings.metadata,
                               process_settings = settings.process_settings,
-                              high_quality_process = settings.high_quality_process,
+                              gpu_processing = gpu_processing_requested,
                               gpu_process = settings.gpu_process,
+                              gpu_fallback_mode,
                               output_width,
                               output_height,
                               output_frame_bytes,
@@ -2017,8 +2046,9 @@ VideoExportResult export_video_exact(
                 pipeline,
                 metadata,
                 process_settings,
-                high_quality_process,
+                gpu_processing,
                 gpu_process,
+                gpu_fallback_mode,
                 output_width,
                 output_height,
                 output_frame_bytes,
@@ -2231,6 +2261,33 @@ VideoExportResult export_video_exact(
             + ",\"written_frame_count\":" + std::to_string(writer_result.frames_written));
     return result;
 }
+
+#ifdef PIXATTO_VIDEO_BACKEND_TEST_HOOKS
+VideoFrameProcessTestResult process_video_frame_for_export_for_test(
+    const Image& source,
+    const ProcessSettings& settings,
+    bool gpu_processing,
+    const std::function<VideoGpuProcessResult(const Image&, const ProcessSettings&, Image&, std::string&)>& gpu_process,
+    const std::shared_ptr<std::atomic_bool>& gpu_fallback_mode)
+{
+    VideoFrameProcessTestResult result;
+    std::vector<unsigned char> frame = source.rgba;
+    VideoMetadata metadata;
+    metadata.width = source.width;
+    metadata.height = source.height;
+    result.ok = process_frame_for_export(
+        frame,
+        metadata,
+        settings,
+        gpu_processing,
+        gpu_process,
+        gpu_fallback_mode,
+        {},
+        result.processed,
+        result.error);
+    return result;
+}
+#endif
 
 std::string video_container_extension_filter(VideoContainer container)
 {

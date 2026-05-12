@@ -116,7 +116,7 @@ struct VideoExportSettings {
     int crf = 18;
     int qp = 16;
     VideoHardwareSpeed hardware_speed = VideoHardwareSpeed::Balanced;
-    bool high_quality_process = true;
+    bool gpu_processing = false;
     std::function<VideoGpuProcessResult(const Image&, const ProcessSettings&, Image&, std::string&)> gpu_process;
 };
 
@@ -183,5 +183,20 @@ struct VideoDimensions {
 [[nodiscard]] std::string video_container_extension_filter(VideoContainer container);
 [[nodiscard]] std::string format_video_time(double seconds);
 [[nodiscard]] std::string format_video_fps(double fps);
+
+#ifdef PIXATTO_VIDEO_BACKEND_TEST_HOOKS
+struct VideoFrameProcessTestResult {
+    bool ok = false;
+    Image processed;
+    std::string error;
+};
+
+[[nodiscard]] VideoFrameProcessTestResult process_video_frame_for_export_for_test(
+    const Image& source,
+    const ProcessSettings& settings,
+    bool gpu_processing,
+    const std::function<VideoGpuProcessResult(const Image&, const ProcessSettings&, Image&, std::string&)>& gpu_process,
+    const std::shared_ptr<std::atomic_bool>& gpu_fallback_mode);
+#endif
 
 } // namespace pixatto

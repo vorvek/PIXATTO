@@ -157,7 +157,7 @@ private:
         int crf = 18;
         int qp = 16;
         VideoHardwareSpeed hardware_speed = VideoHardwareSpeed::Balanced;
-        bool high_quality_process = true;
+        bool gpu_processing = false;
         bool request_open = false;
     };
     struct VideoExportGpuRequest;

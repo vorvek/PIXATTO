@@ -778,9 +778,18 @@ bool supports_low_quality_process_impl(const ProcessSettings& settings)
 
     switch (settings.dither_mode) {
     case DitherMode::Bayer:
+    case DitherMode::BlueNoise:
+    case DitherMode::ClusterDot4x4:
+    case DitherMode::ClusterDot8x8:
+    case DitherMode::Horizontal2x2:
+    case DitherMode::Horizontal8x1:
+    case DitherMode::Horizontal12x4:
+    case DitherMode::Vertical2x2:
+    case DitherMode::Vertical1x8:
+    case DitherMode::Vertical4x12:
+    case DitherMode::Diagonal5x5:
         return true;
     case DitherMode::None:
-    case DitherMode::BlueNoise:
     case DitherMode::FloydSteinberg:
     case DitherMode::FalseFloydSteinberg:
     case DitherMode::FilterLite:
@@ -793,15 +802,6 @@ bool supports_low_quality_process_impl(const ProcessSettings& settings)
     case DitherMode::Sierra:
     case DitherMode::TwoRowSierra:
     case DitherMode::Riemersma:
-    case DitherMode::ClusterDot4x4:
-    case DitherMode::ClusterDot8x8:
-    case DitherMode::Horizontal2x2:
-    case DitherMode::Horizontal8x1:
-    case DitherMode::Horizontal12x4:
-    case DitherMode::Vertical2x2:
-    case DitherMode::Vertical1x8:
-    case DitherMode::Vertical4x12:
-    case DitherMode::Diagonal5x5:
         return false;
     }
     return false;

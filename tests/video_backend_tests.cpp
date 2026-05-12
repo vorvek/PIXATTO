@@ -1,7 +1,9 @@
 #include "pixatto/video_backend.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <filesystem>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -230,14 +232,20 @@ void encode_command_uses_raw_frame_pipe_and_profile_settings()
     require(args.empty());
 
     settings.audio_mode = pixatto::VideoAudioMode::None;
+    settings.process_settings = {};
+    settings.gpu_processing = true;
+    args = pixatto::build_video_encode_command(tools, settings, 320, 240);
+    require(args.empty());
+    settings.gpu_processing = false;
+
     settings.process_settings.dither_mode = pixatto::DitherMode::Atkinson;
     settings.process_settings.dither_amount = 1.0F;
-    settings.high_quality_process = false;
+    settings.gpu_processing = true;
     args = pixatto::build_video_encode_command(tools, settings, 320, 240);
     require(args.empty());
 
     settings.process_settings = {};
-    settings.high_quality_process = true;
+    settings.gpu_processing = false;
     settings.audio_mode = pixatto::VideoAudioMode::None;
     settings.capabilities = capabilities;
     settings.capabilities.muxers = {"matroska"};
@@ -251,6 +259,94 @@ void encode_command_uses_raw_frame_pipe_and_profile_settings()
     require(args.empty());
 }
 
+void video_frame_processing_gpu_polarity_and_fallback()
+{
+    const pixatto::Image source = {
+        2,
+        2,
+        {
+            0, 0, 0, 255,
+            255, 255, 255, 255,
+            255, 255, 255, 255,
+            255, 255, 255, 255,
+        },
+    };
+
+    pixatto::ProcessSettings settings;
+    settings.pixel_size = 2;
+    settings.color_levels = 8;
+
+    const pixatto::Image exact = pixatto::process_image_collapsed(source, settings);
+    const pixatto::Image sampled = pixatto::process_image_sampled_collapsed(source, settings);
+    require(exact.rgba != sampled.rgba);
+
+    auto fallback_mode = std::make_shared<std::atomic_bool>(false);
+    pixatto::VideoFrameProcessTestResult result =
+        pixatto::process_video_frame_for_export_for_test(source, settings, false, {}, fallback_mode);
+    require(result.ok);
+    require(result.processed.rgba == exact.rgba);
+    require(!fallback_mode->load());
+
+    int gpu_calls = 0;
+    const pixatto::Image gpu_image = {1, 1, {12, 34, 56, 255}};
+    result = pixatto::process_video_frame_for_export_for_test(
+        source,
+        settings,
+        true,
+        [&](const pixatto::Image&, const pixatto::ProcessSettings&, pixatto::Image& processed, std::string&) {
+            ++gpu_calls;
+            processed = gpu_image;
+            return pixatto::VideoGpuProcessResult::Success;
+        },
+        fallback_mode);
+    require(result.ok);
+    require(result.processed.rgba == gpu_image.rgba);
+    require(gpu_calls == 1);
+    require(!fallback_mode->load());
+
+    result = pixatto::process_video_frame_for_export_for_test(
+        source,
+        settings,
+        true,
+        [&](const pixatto::Image&, const pixatto::ProcessSettings&, pixatto::Image&, std::string& error) {
+            ++gpu_calls;
+            error = "gpu failed";
+            return pixatto::VideoGpuProcessResult::Fallback;
+        },
+        fallback_mode);
+    require(result.ok);
+    require(result.processed.rgba == sampled.rgba);
+    require(gpu_calls == 2);
+    require(fallback_mode->load());
+
+    result = pixatto::process_video_frame_for_export_for_test(
+        source,
+        settings,
+        true,
+        [&](const pixatto::Image&, const pixatto::ProcessSettings&, pixatto::Image&, std::string&) {
+            ++gpu_calls;
+            return pixatto::VideoGpuProcessResult::Success;
+        },
+        fallback_mode);
+    require(result.ok);
+    require(result.processed.rgba == sampled.rgba);
+    require(gpu_calls == 2);
+
+    fallback_mode = std::make_shared<std::atomic_bool>(false);
+    result = pixatto::process_video_frame_for_export_for_test(
+        source,
+        settings,
+        true,
+        [](const pixatto::Image&, const pixatto::ProcessSettings&, pixatto::Image&, std::string& error) {
+            error = "explicit cancel";
+            return pixatto::VideoGpuProcessResult::Canceled;
+        },
+        fallback_mode);
+    require(!result.ok);
+    require(result.error == "explicit cancel");
+    require(!fallback_mode->load());
+}
+
 } // namespace
 
 int main()
@@ -260,5 +356,6 @@ int main()
     metadata_parser_handles_fps_frames_and_audio();
     output_dimensions_and_audio_rules_are_container_aware();
     encode_command_uses_raw_frame_pipe_and_profile_settings();
+    video_frame_processing_gpu_polarity_and_fallback();
     return 0;
 }
