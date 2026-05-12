@@ -168,6 +168,7 @@ private:
         std::future<VideoExportResult> result;
         std::chrono::steady_clock::time_point started_at;
         std::shared_ptr<VideoExportGpuQueue> gpu_queue;
+        std::uint64_t displayed_preview_generation = 0;
     };
     struct VideoExportGpuRequest {
         const Image* source = nullptr;
@@ -247,6 +248,7 @@ private:
     void update_pending_video_hardware_probe();
     void update_pending_video_preview();
     void update_pending_video_export();
+    void update_video_export_preview();
     void service_video_export_gpu_queue();
     void close_video_export_gpu_queue(
         const std::shared_ptr<VideoExportGpuQueue>& queue,

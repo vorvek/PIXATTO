@@ -3309,6 +3309,9 @@ void App::update_preview_if_needed()
         }
         model_renderer_.update_processed_textures(model_processed_textures_);
     } else {
+        if (pending_video_export_) {
+            return;
+        }
         if (video_.playing) {
             edit_session_.clear_preview_dirty();
             return;
@@ -3787,7 +3790,7 @@ void App::update_video_playback()
 void App::update_pending_video_preview()
 {
     if (!pending_video_preview_) {
-        if (document_mode_ == DocumentMode::Video && edit_session_.preview_dirty()) {
+        if (document_mode_ == DocumentMode::Video && edit_session_.preview_dirty() && !pending_video_export_) {
             request_video_preview(video_.current_time, true);
         }
         return;
@@ -3810,13 +3813,22 @@ void App::update_pending_video_preview()
         loaded.error = "unknown error";
     }
 
+    if (pending_video_export_) {
+        if (loaded.error.empty() && !loaded.decoded.empty()) {
+            video_decoded_frame_ = std::move(loaded.decoded);
+            video_decoded_frame_time_ = pending.decode_time_seconds;
+            video_decoded_frame_valid_ = true;
+        }
+        return;
+    }
+
     if (pending.generation != video_.preview_generation) {
         if (loaded.error.empty() && !loaded.decoded.empty()) {
             video_decoded_frame_ = std::move(loaded.decoded);
             video_decoded_frame_time_ = pending.decode_time_seconds;
             video_decoded_frame_valid_ = true;
         }
-        if (edit_session_.preview_dirty()) {
+        if (edit_session_.preview_dirty() && !pending_video_export_) {
             request_video_preview(video_.current_time, true);
         }
         return;
@@ -3834,8 +3846,44 @@ void App::update_pending_video_preview()
     rebuild_texture(result_texture_, result_, true);
     video_.current_time = pending.time_seconds;
 
-    if (edit_session_.preview_dirty()) {
+    if (edit_session_.preview_dirty() && !pending_video_export_) {
         request_video_preview(video_.current_time, true);
+    }
+}
+
+void App::update_video_export_preview()
+{
+    if (!pending_video_export_ || !pending_video_export_->progress || document_mode_ != DocumentMode::Video) {
+        return;
+    }
+
+    Image frame;
+    int frame_index = -1;
+    std::uint64_t generation = 0;
+    {
+        std::lock_guard lock(pending_video_export_->progress->preview_mutex);
+        generation = pending_video_export_->progress->preview_generation;
+        if (generation == 0 || generation == pending_video_export_->displayed_preview_generation) {
+            return;
+        }
+        frame_index = pending_video_export_->progress->preview_frame_index;
+        if (pending_video_export_->progress->preview_frame.empty()) {
+            pending_video_export_->displayed_preview_generation = generation;
+            return;
+        }
+        frame = pending_video_export_->progress->preview_frame;
+    }
+
+    pending_video_export_->displayed_preview_generation = generation;
+    result_ = std::move(frame);
+    rebuild_texture(result_texture_, result_, true);
+    video_decoded_frame_valid_ = false;
+    if (video_.metadata.fps > 0.0 && frame_index >= 0) {
+        video_.current_time = std::clamp(
+            static_cast<double>(frame_index) / video_.metadata.fps,
+            0.0,
+            std::max(0.0, video_.metadata.duration_seconds));
+        video_.playback_seek_pending = true;
     }
 }
 
@@ -3889,10 +3937,14 @@ void App::update_pending_video_export()
         return;
     }
 
+    update_video_export_preview();
+
     using namespace std::chrono_literals;
     if (pending_video_export_->result.wait_for(0ms) != std::future_status::ready) {
         return;
     }
+
+    update_video_export_preview();
 
     PendingVideoExportState pending = std::move(*pending_video_export_);
     pending_video_export_.reset();
@@ -4482,6 +4534,7 @@ void App::start_video_export_to_path(const std::filesystem::path& path)
         return export_video_exact(tools, settings, progress);
     });
     video_.playing = false;
+    ++video_.preview_generation;
     pending_video_export_ = std::move(pending);
     set_video_export_fast_swap(pending_video_export_->gpu_queue != nullptr);
     set_status(textf(TextId::StatusVideoExportStartedFormat, {{"profile", settings.profile.label}}));

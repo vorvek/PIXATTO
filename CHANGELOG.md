@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.1 - 2026-05-12
+
+- Synchronized video export progress with the visible preview by showing the latest processed frame sent to FFmpeg and moving the timeline to that frame during export.
+- Kept export-owned preview updates from being overwritten by stale video preview decodes while an export is running.
+- Limited export preview snapshots to a low-frequency cadence so long video exports do not spend significant time copying preview frames.
+
 ## 1.8.0 - 2026-05-12
 
 - Added video import and export workflows with FFmpeg/ffprobe integration, timeline scrubbing, playback controls, progress reporting, and Media Foundation preview playback on Windows.

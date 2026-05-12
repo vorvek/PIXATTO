@@ -1055,6 +1055,21 @@ void close_pipeline_input(VideoFramePipeline& pipeline)
     pipeline.output_cv.notify_all();
 }
 
+void publish_video_export_preview(
+    const std::shared_ptr<VideoExportProgress>& progress,
+    const Image& frame,
+    int frame_index)
+{
+    if (!progress || frame.empty()) {
+        return;
+    }
+
+    std::lock_guard lock(progress->preview_mutex);
+    progress->preview_frame = frame;
+    progress->preview_frame_index = frame_index;
+    ++progress->preview_generation;
+}
+
 struct VideoFrameWorkerGuard {
     VideoFramePipeline& pipeline;
 
@@ -1166,6 +1181,9 @@ void video_frame_writer(
 {
     using namespace std::chrono_literals;
 
+    auto last_preview_publish = std::chrono::steady_clock::time_point{};
+    bool final_preview_published = false;
+
     while (true) {
         Image frame;
         {
@@ -1224,6 +1242,19 @@ void video_frame_writer(
             set_pipeline_error(pipeline, write_error);
             result.error = write_error;
             return;
+        }
+
+        const int frame_index = result.frames_written;
+        const auto now = std::chrono::steady_clock::now();
+        const bool final_metadata_frame = !final_preview_published && total_frames > 0 && frame_index + 1 >= total_frames;
+        if (last_preview_publish.time_since_epoch().count() == 0
+            || now - last_preview_publish >= 5s
+            || final_metadata_frame) {
+            publish_video_export_preview(progress, frame, frame_index);
+            last_preview_publish = now;
+            if (final_metadata_frame) {
+                final_preview_published = true;
+            }
         }
 
         ++result.frames_written;

@@ -4,9 +4,11 @@
 #include "pixatto/image_processing.hpp"
 
 #include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -126,6 +128,10 @@ struct VideoExportProgress {
     std::atomic<int> frames_total = 0;
     std::atomic<int> percent = 0;
     std::atomic<bool> encoding = false;
+    std::mutex preview_mutex;
+    Image preview_frame;
+    int preview_frame_index = -1;
+    std::uint64_t preview_generation = 0;
 };
 
 struct VideoExportResult {

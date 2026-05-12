@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -217,6 +218,17 @@ int run()
     std::shared_ptr<pixatto::VideoExportProgress> progress = std::make_shared<pixatto::VideoExportProgress>();
     pixatto::VideoExportResult exported = pixatto::export_video_exact(tools, settings, progress);
     require(exported.success, exported.error.empty() ? "video export failed" : exported.error.c_str());
+    const pixatto::VideoDimensions expected = pixatto::video_export_dimensions(metadata, settings.process_settings.pixel_size, *profile);
+    {
+        std::lock_guard lock(progress->preview_mutex);
+        require(progress->preview_generation > 0, "video export preview frame missing");
+        require(progress->preview_frame_index >= 0, "video export preview frame index missing");
+        require(progress->preview_frame.width == expected.width, "video export preview width mismatch");
+        require(progress->preview_frame.height == expected.height, "video export preview height mismatch");
+        require(
+            progress->preview_frame.rgba.size() == static_cast<std::size_t>(expected.width) * static_cast<std::size_t>(expected.height) * 4U,
+            "video export preview byte size mismatch");
+    }
 #ifndef NDEBUG
     require(!exported.diagnostic_log_path.empty(), "video export diagnostic log path missing");
     require(std::filesystem::is_regular_file(exported.diagnostic_log_path), "video export diagnostic log missing");
@@ -239,7 +251,6 @@ int run()
     }
     pixatto::VideoMetadata output_metadata = pixatto::probe_video_metadata(tools, output, error);
     require(error.empty(), "failed to probe exported video");
-    const pixatto::VideoDimensions expected = pixatto::video_export_dimensions(metadata, settings.process_settings.pixel_size, *profile);
     require(output_metadata.width == expected.width, "exported video width mismatch");
     require(output_metadata.height == expected.height, "exported video height mismatch");
     require(output_metadata.fps > 0.0, "exported video fps missing");
