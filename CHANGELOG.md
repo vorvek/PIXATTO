@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.8.0 - 2026-05-12
+
+- Added video import and export workflows with FFmpeg/ffprobe integration, timeline scrubbing, playback controls, progress reporting, and Media Foundation preview playback on Windows.
+- Added video export profiles for H.264, H.265, AV1, VP9, and detected NVIDIA NVENC, AMD AMF, and Intel QSV hardware encoders.
+- Split video export choices into video codec, audio mode, and container controls, with MP4, MKV, and WebM compatibility rules.
+- Added QP quality controls for hardware encoders and CRF quality controls for software encoders.
+- Added `GPU Processing` for compatible video exports, using a shader-backed sampled path for faster frame processing with CPU fallback diagnostics.
+- Expanded GPU export processing to support fixed palettes plus stateless ordered/noise dithers: Bayer, blue noise, clustered-dot, horizontal, vertical, and diagonal patterns.
+- Kept generated palette reduction, error diffusion, and Riemersma dithering on the CPU because they require global or sequential processing state.
+- Disabled JSONL video export diagnostics in release builds while keeping debug diagnostics available.
+- Localized the new video export UI, GPU-processing labels, hints, and validation text across the app's supported languages.
+- Added a video workflow screenshot to the README alongside the image and 3D model workflows.
+
 ## 1.7.2 - 2026-05-03
 
 - Changed the default pixel size from `8` to `2`.

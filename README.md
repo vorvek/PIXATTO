@@ -4,9 +4,9 @@
 
 PIXATTO is a desktop texture tool for turning images, videos, and 3D model textures into pseudo-pixel art. It runs on Windows, Linux, and macOS, and is written in C++20 with SDL3, OpenGL, and Dear ImGui.
 
-| Image workflow | 3D model texture workflow |
-| --- | --- |
-| ![PIXATTO showing an original image beside a processed pseudo-pixel-art result](docs/pixatto-in-action.png) | ![PIXATTO showing a 3D model preview with materials and a texture drawer](docs/3d_models.png) |
+| Image workflow | Video workflow | 3D model texture workflow |
+| --- | --- | --- |
+| ![PIXATTO showing an original image beside a processed pseudo-pixel-art result](docs/pixatto-in-action.png) | ![PIXATTO showing a processed video preview with timeline and export progress](docs/video.png) | ![PIXATTO showing a 3D model preview with materials and a texture drawer](docs/3d_models.png) |
 
 ## What It Does
 
@@ -46,7 +46,7 @@ Video mode uses external `ffmpeg` and `ffprobe`:
 - On Linux and macOS, PIXATTO looks on `PATH`.
 - PIXATTO does not bundle FFmpeg binaries.
 
-Scrubbed and paused frames are decoded, processed with the current settings, collapsed to one output pixel per pixelization block, and uploaded as the preview texture. Export streams decoded frames through PIXATTO and into an FFmpeg encoder, so the exported frames use the exact CPU processing path.
+Scrubbed and paused frames are decoded, processed with the current settings, collapsed to one output pixel per pixelization block, and uploaded as the preview texture. Export streams decoded frames through PIXATTO and into an FFmpeg encoder. Compatible export settings can use GPU Processing for the shader-backed fast path, with CPU fallback for generated palettes, error diffusion, and Riemersma dithering.
 
 On Windows, timeline playback uses Media Foundation for native preview decoding instead of launching FFmpeg for every displayed frame. Linux and macOS native playback backends are planned; until then, unsupported preview decode falls back to still-frame updates.
 
