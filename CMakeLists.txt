@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(Pixatto VERSION 1.8.1 LANGUAGES C CXX)
+project(Pixatto VERSION 1.9.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

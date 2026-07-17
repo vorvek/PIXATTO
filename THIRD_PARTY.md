@@ -42,3 +42,5 @@ PIXATTO bundles these default palette files from Lospec. Links point to the orig
 - [apple-ii](https://lospec.com/palette-list/apple-ii)
 
 The README screenshot and icon files are original project assets.
+
+PIXATTO bundles Atkinson Hyperlegible Regular and Bold from Google Fonts. Copyright 2020 Braille Institute of America, Inc.; licensed under the SIL Open Font License 1.1. The complete font license is included at `assets/fonts/atkinson-hyperlegible/OFL.txt`.

@@ -29,6 +29,8 @@
 #include <string_view>
 #include <vector>
 
+struct ImFont;
+
 namespace pixatto {
 
 class App {
@@ -68,6 +70,16 @@ private:
     enum class ViewportMode {
         Single,
         Split,
+    };
+
+    enum class CollapsiblePanel {
+        Presets,
+        Pixelize,
+        Dithering,
+        Adjustments,
+        ModelMaterials,
+        TextureDrawer,
+        Count,
     };
 
     using HistorySnapshot = ProcessingEditSession::Snapshot;
@@ -347,6 +359,10 @@ private:
 
     SDL_Window* window_ = nullptr;
     SDL_GLContext gl_context_ = nullptr;
+    ImFont* panel_header_font_ = nullptr;
+    std::array<bool, static_cast<std::size_t>(CollapsiblePanel::Count)> panel_expanded_ = {true, true, false, false, true, true};
+    std::array<float, static_cast<std::size_t>(CollapsiblePanel::Count)> panel_animation_ = {1.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F};
+    std::array<float, static_cast<std::size_t>(CollapsiblePanel::Count)> panel_content_height_ = {70.0F, 300.0F, 120.0F, 520.0F, 160.0F, 160.0F};
 
     DocumentMode document_mode_ = DocumentMode::Image;
     Image original_;

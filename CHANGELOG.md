@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.0 - 2026-07-17 - The GUI Update
+
+- Redesigned the application with a polished dark theme and orange accents derived from the PIXATTO icon.
+- Reworked the sidebar into wider, individually bordered panels with full-width controls, clearer labels, and animated accordion sections.
+- Increased interface text size and bundled Atkinson Hyperlegible Regular and Bold for a more readable, less condensed typeface.
+- Refreshed the Help, Language, and About dialogs to match the new visual style, with a fixed language layout that no longer needs scrolling or resizing.
+
 ## 1.8.1 - 2026-05-12
 
 - Synchronized video export progress with the visible preview by showing the latest processed frame sent to FFmpeg and moving the timeline to that frame during export.

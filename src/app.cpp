@@ -45,6 +45,10 @@ constexpr const char* kGlslVersion =
 constexpr float kViewportSplitterThickness = 8.0F;
 constexpr float kViewportMinimumPaneSize = 180.0F;
 constexpr const char* kModelTextureDragPayload = "PIXATTO_MODEL_TEXTURE_INDEX";
+constexpr ImU32 kPanelHeaderColor = IM_COL32(255, 146, 45, 255);
+constexpr ImU32 kPanelHeaderHoveredColor = IM_COL32(255, 164, 72, 255);
+constexpr ImU32 kPanelHeaderActiveColor = IM_COL32(255, 178, 98, 255);
+constexpr ImU32 kPanelHeaderTextColor = IM_COL32(48, 18, 6, 255);
 constexpr const char* kLospecPaletteCredits[] = {
     "pico-8",
     "dawnbringer-16",
@@ -395,6 +399,205 @@ void remove_vertical_item_spacing()
 {
     const float spacing = ImGui::GetStyle().ItemSpacing.y;
     ImGui::SetCursorPosY(std::max(0.0F, ImGui::GetCursorPosY() - spacing));
+}
+
+void configure_pixatto_style()
+{
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowPadding = ImVec2(10.0F, 9.0F);
+    style.FramePadding = ImVec2(8.0F, 5.0F);
+    style.CellPadding = ImVec2(8.0F, 5.0F);
+    style.ItemSpacing = ImVec2(8.0F, 7.0F);
+    style.ItemInnerSpacing = ImVec2(6.0F, 4.0F);
+    style.ScrollbarSize = 14.0F;
+    style.GrabMinSize = 10.0F;
+    style.WindowBorderSize = 1.0F;
+    style.ChildBorderSize = 1.0F;
+    style.PopupBorderSize = 1.0F;
+    style.FrameBorderSize = 0.0F;
+    style.WindowRounding = 7.0F;
+    style.ChildRounding = 6.0F;
+    style.FrameRounding = 5.0F;
+    style.PopupRounding = 6.0F;
+    style.ScrollbarRounding = 8.0F;
+    style.GrabRounding = 5.0F;
+    style.TabRounding = 5.0F;
+
+    ImVec4* colors = style.Colors;
+    colors[ImGuiCol_Text] = ImVec4(0.94F, 0.92F, 0.90F, 1.00F);
+    colors[ImGuiCol_TextDisabled] = ImVec4(0.53F, 0.50F, 0.49F, 1.00F);
+    colors[ImGuiCol_WindowBg] = ImVec4(0.055F, 0.039F, 0.071F, 1.00F);
+    colors[ImGuiCol_ChildBg] = ImVec4(0.071F, 0.063F, 0.086F, 1.00F);
+    colors[ImGuiCol_PopupBg] = ImVec4(0.090F, 0.071F, 0.102F, 0.98F);
+    colors[ImGuiCol_Border] = ImVec4(0.21F, 0.18F, 0.21F, 1.00F);
+    colors[ImGuiCol_BorderShadow] = ImVec4(0.0F, 0.0F, 0.0F, 0.0F);
+    colors[ImGuiCol_FrameBg] = ImVec4(0.13F, 0.11F, 0.14F, 1.00F);
+    colors[ImGuiCol_FrameBgHovered] = ImVec4(0.24F, 0.15F, 0.11F, 1.00F);
+    colors[ImGuiCol_FrameBgActive] = ImVec4(0.34F, 0.18F, 0.10F, 1.00F);
+    colors[ImGuiCol_TitleBg] = ImVec4(0.071F, 0.055F, 0.082F, 1.00F);
+    colors[ImGuiCol_TitleBgActive] = ImVec4(0.11F, 0.078F, 0.090F, 1.00F);
+    colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.071F, 0.055F, 0.082F, 1.00F);
+    colors[ImGuiCol_MenuBarBg] = ImVec4(0.071F, 0.055F, 0.082F, 1.00F);
+    colors[ImGuiCol_ScrollbarBg] = ImVec4(0.055F, 0.043F, 0.063F, 1.00F);
+    colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.24F, 0.20F, 0.23F, 1.00F);
+    colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.36F, 0.24F, 0.18F, 1.00F);
+    colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(1.00F, 0.57F, 0.18F, 1.00F);
+    colors[ImGuiCol_CheckMark] = ImVec4(1.00F, 0.57F, 0.18F, 1.00F);
+    colors[ImGuiCol_SliderGrab] = ImVec4(1.00F, 0.57F, 0.18F, 1.00F);
+    colors[ImGuiCol_SliderGrabActive] = ImVec4(1.00F, 0.69F, 0.37F, 1.00F);
+    colors[ImGuiCol_Button] = ImVec4(0.15F, 0.13F, 0.16F, 1.00F);
+    colors[ImGuiCol_ButtonHovered] = ImVec4(0.38F, 0.22F, 0.13F, 1.00F);
+    colors[ImGuiCol_ButtonActive] = ImVec4(0.64F, 0.32F, 0.11F, 1.00F);
+    colors[ImGuiCol_Header] = ImVec4(0.16F, 0.13F, 0.16F, 1.00F);
+    colors[ImGuiCol_HeaderHovered] = ImVec4(0.40F, 0.23F, 0.13F, 1.00F);
+    colors[ImGuiCol_HeaderActive] = ImVec4(0.70F, 0.35F, 0.11F, 1.00F);
+    colors[ImGuiCol_Separator] = ImVec4(0.22F, 0.19F, 0.22F, 1.00F);
+    colors[ImGuiCol_SeparatorHovered] = ImVec4(1.00F, 0.57F, 0.18F, 0.78F);
+    colors[ImGuiCol_SeparatorActive] = ImVec4(1.00F, 0.57F, 0.18F, 1.00F);
+    colors[ImGuiCol_ResizeGrip] = ImVec4(1.00F, 0.57F, 0.18F, 0.18F);
+    colors[ImGuiCol_ResizeGripHovered] = ImVec4(1.00F, 0.57F, 0.18F, 0.55F);
+    colors[ImGuiCol_ResizeGripActive] = ImVec4(1.00F, 0.57F, 0.18F, 0.90F);
+    colors[ImGuiCol_TabHovered] = ImVec4(0.38F, 0.22F, 0.13F, 1.00F);
+    colors[ImGuiCol_Tab] = ImVec4(0.13F, 0.11F, 0.14F, 1.00F);
+    colors[ImGuiCol_TabSelected] = ImVec4(0.43F, 0.24F, 0.12F, 1.00F);
+    colors[ImGuiCol_TabSelectedOverline] = ImVec4(1.00F, 0.57F, 0.18F, 1.00F);
+    colors[ImGuiCol_TabDimmed] = ImVec4(0.090F, 0.078F, 0.102F, 1.00F);
+    colors[ImGuiCol_TabDimmedSelected] = ImVec4(0.24F, 0.15F, 0.11F, 1.00F);
+    colors[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(1.00F, 0.57F, 0.18F, 0.62F);
+    colors[ImGuiCol_PlotLines] = ImVec4(1.00F, 0.57F, 0.18F, 1.00F);
+    colors[ImGuiCol_PlotLinesHovered] = ImVec4(1.00F, 0.69F, 0.37F, 1.00F);
+    colors[ImGuiCol_PlotHistogram] = ImVec4(1.00F, 0.57F, 0.18F, 1.00F);
+    colors[ImGuiCol_PlotHistogramHovered] = ImVec4(1.00F, 0.69F, 0.37F, 1.00F);
+    colors[ImGuiCol_TableHeaderBg] = ImVec4(0.15F, 0.12F, 0.14F, 1.00F);
+    colors[ImGuiCol_TableBorderStrong] = ImVec4(0.25F, 0.21F, 0.23F, 1.00F);
+    colors[ImGuiCol_TableBorderLight] = ImVec4(0.18F, 0.15F, 0.17F, 1.00F);
+    colors[ImGuiCol_TextSelectedBg] = ImVec4(1.00F, 0.57F, 0.18F, 0.32F);
+    colors[ImGuiCol_DragDropTarget] = ImVec4(1.00F, 0.57F, 0.18F, 0.90F);
+    colors[ImGuiCol_NavCursor] = ImVec4(1.00F, 0.57F, 0.18F, 1.00F);
+}
+
+bool render_panel_header(const char* id, const char* label, ImFont* font, bool& expanded, bool collapsible)
+{
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float width = std::max(1.0F, ImGui::GetContentRegionAvail().x);
+    const float height = ImGui::GetFrameHeight();
+
+    ImGui::PushID(id);
+    bool clicked = false;
+    if (collapsible) {
+        clicked = ImGui::InvisibleButton("##PanelHeader", ImVec2(width, height));
+    } else {
+        ImGui::Dummy(ImVec2(width, height));
+    }
+    if (collapsible && clicked) {
+        expanded = !expanded;
+    }
+
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    const ImU32 header_color = ImGui::IsItemActive() ? kPanelHeaderActiveColor : (ImGui::IsItemHovered() ? kPanelHeaderHoveredColor : kPanelHeaderColor);
+    draw_list->AddRectFilled(min, max, header_color, style.FrameRounding);
+
+    if (collapsible) {
+        const float arrow_center_x = min.x + style.FramePadding.x + 5.0F;
+        const float arrow_center_y = min.y + height * 0.5F;
+        if (expanded) {
+            draw_list->AddTriangleFilled(ImVec2(arrow_center_x - 4.0F, arrow_center_y - 2.0F), ImVec2(arrow_center_x + 4.0F, arrow_center_y - 2.0F),
+                                         ImVec2(arrow_center_x, arrow_center_y + 3.0F), kPanelHeaderTextColor);
+        } else {
+            draw_list->AddTriangleFilled(ImVec2(arrow_center_x - 2.0F, arrow_center_y - 4.0F), ImVec2(arrow_center_x - 2.0F, arrow_center_y + 4.0F),
+                                         ImVec2(arrow_center_x + 3.0F, arrow_center_y), kPanelHeaderTextColor);
+        }
+    }
+
+    if (font) {
+        ImGui::PushFont(font);
+    }
+    const ImVec2 text_size = ImGui::CalcTextSize(label);
+    const float text_offset = collapsible ? 16.0F : 0.0F;
+    const ImVec2 text_position(min.x + style.FramePadding.x + text_offset, min.y + std::max(0.0F, (height - text_size.y) * 0.5F));
+    draw_list->PushClipRect(min, max, true);
+    draw_list->AddText(text_position, kPanelHeaderTextColor, label);
+    draw_list->PopClipRect();
+    if (font) {
+        ImGui::PopFont();
+    }
+
+    ImGui::PopID();
+    return clicked;
+}
+
+struct PanelBlockLayout {
+    bool render_contents = false;
+    bool opened_this_frame = false;
+    float body_start_y = 0.0F;
+    float* content_height = nullptr;
+};
+
+PanelBlockLayout begin_panel_block(
+    const char* id,
+    const char* label,
+    ImFont* font,
+    bool& expanded,
+    float& animation,
+    float& content_height,
+    bool collapsible = true)
+{
+    if (!collapsible) {
+        expanded = true;
+        animation = 1.0F;
+    }
+    constexpr float kAnimationDuration = 0.21F;
+    const float animation_step = ImGui::GetIO().DeltaTime / kAnimationDuration;
+    animation = expanded
+        ? std::min(1.0F, animation + animation_step)
+        : std::max(0.0F, animation - animation_step);
+    const float eased = animation * animation * (3.0F - 2.0F * animation);
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float collapsed_height = style.WindowPadding.y * 2.0F + ImGui::GetFrameHeight();
+    const float expanded_body_height = style.ItemSpacing.y + std::max(0.0F, content_height);
+    const float panel_height = collapsed_height + expanded_body_height * eased;
+
+    ImGui::PushID(id);
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.071F, 0.063F, 0.086F, 1.00F));
+    ImGui::BeginChild("##PanelBlock", ImVec2(0.0F, panel_height), ImGuiChildFlags_Borders,
+                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+
+    const bool was_expanded = expanded;
+    render_panel_header("Header", label, font, expanded, collapsible);
+
+    PanelBlockLayout layout;
+    layout.render_contents = expanded || animation > 0.0F;
+    layout.opened_this_frame = !was_expanded && expanded;
+    layout.content_height = &content_height;
+    if (layout.render_contents) {
+        layout.body_start_y = ImGui::GetCursorPosY();
+    }
+    return layout;
+}
+
+void end_panel_block(PanelBlockLayout& layout)
+{
+    if (layout.render_contents) {
+        const float measured_height = std::max(0.0F, ImGui::GetCursorPosY() - layout.body_start_y);
+        if (measured_height > 0.0F) {
+            *layout.content_height = measured_height;
+        }
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+    ImGui::PopID();
+}
+
+void render_control_label_value(const char* label, const char* value)
+{
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine();
+    const float value_width = ImGui::CalcTextSize(value).x;
+    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetContentRegionMax().x - value_width));
+    ImGui::TextDisabled("%s", value);
 }
 
 bool render_splitter(const char* id, ImVec2 size, ImGuiMouseCursor cursor, float& delta)
@@ -881,18 +1084,38 @@ bool render_language_option(Language language, bool selected, float width)
     return pressed;
 }
 
-bool add_font_from_candidates(const std::vector<std::filesystem::path>& candidates, float size, ImFontConfig* config, const ImWchar* ranges)
+ImFont* add_font_from_candidates(const std::vector<std::filesystem::path>& candidates, float size, ImFontConfig* config, const ImWchar* ranges)
 {
     for (const std::filesystem::path& candidate : candidates) {
         std::error_code ec;
         if (!std::filesystem::is_regular_file(candidate, ec)) {
             continue;
         }
-        if (ImGui::GetIO().Fonts->AddFontFromFileTTF(candidate.string().c_str(), size, config, ranges)) {
-            return true;
+        if (ImFont* font = ImGui::GetIO().Fonts->AddFontFromFileTTF(candidate.string().c_str(), size, config, ranges)) {
+            return font;
         }
     }
-    return false;
+    return nullptr;
+}
+
+std::vector<std::filesystem::path> bundled_font_candidates(const char* filename)
+{
+    const std::filesystem::path relative = std::filesystem::path("assets") / "fonts" / "atkinson-hyperlegible" / filename;
+    std::vector<std::filesystem::path> candidates;
+
+    std::error_code ec;
+    const std::filesystem::path current = std::filesystem::current_path(ec);
+    if (!ec && !current.empty()) {
+        candidates.push_back(current / relative);
+    }
+
+    if (const char* base_path = SDL_GetBasePath()) {
+        candidates.push_back(std::filesystem::path(base_path) / relative);
+    }
+
+    std::sort(candidates.begin(), candidates.end());
+    candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+    return candidates;
 }
 
 void set_window_icon(SDL_Window* window)
@@ -988,11 +1211,7 @@ bool App::initialize()
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
     ImGui::StyleColorsDark();
-    ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowRounding = 6.0F;
-    style.FrameRounding = 4.0F;
-    style.ChildRounding = 4.0F;
-    style.GrabRounding = 4.0F;
+    configure_pixatto_style();
 
     configure_fonts();
     ImGui_ImplSDL3_InitForOpenGL(window_, gl_context_);
@@ -1112,10 +1331,12 @@ void App::render_frame()
         ImGui::BeginDisabled();
     }
 
-    const float control_width = std::clamp(ImGui::GetContentRegionAvail().x * 0.24F, 300.0F, 390.0F);
-    ImGui::BeginChild("Controls", ImVec2(control_width, 0), ImGuiChildFlags_Borders);
+    const float control_width = std::clamp(ImGui::GetContentRegionAvail().x * 0.28F, 380.0F, 440.0F);
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+    ImGui::BeginChild("Controls", ImVec2(control_width, 0), ImGuiChildFlags_None);
     render_controls();
     ImGui::EndChild();
+    ImGui::PopStyleColor();
 
     ImGui::SameLine();
 
@@ -1294,38 +1515,50 @@ void App::render_language_picker_popup()
         open_language_picker_ = false;
     }
 
-    const float option_width = language_option_width();
     const ImGuiStyle& style = ImGui::GetStyle();
+    const auto& languages = language_definitions();
+    const float option_width = language_option_width();
     const float side_padding = 24.0F;
-    const float popup_width = std::max(300.0F, option_width * 2.0F + style.ItemSpacing.x + side_padding * 2.0F + 18.0F);
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    const float popup_height = std::min(410.0F, std::max(260.0F, viewport->WorkSize.y - 24.0F));
+    const float available_width = std::max(300.0F, viewport->WorkSize.x - 24.0F);
+    std::size_t language_column_count = 3U;
+    while (language_column_count > 1U
+           && option_width * static_cast<float>(language_column_count) + style.ItemSpacing.x * static_cast<float>(language_column_count - 1U)
+                   + side_padding * 2.0F
+               > available_width) {
+        --language_column_count;
+    }
+    const std::size_t rows_per_column = (languages.size() + language_column_count - 1U) / language_column_count;
+    const float list_width = option_width * static_cast<float>(language_column_count)
+        + style.ItemSpacing.x * static_cast<float>(language_column_count - 1U);
+    const float full_list_height =
+        static_cast<float>(rows_per_column) * kLanguageOptionRowHeight + static_cast<float>(rows_per_column - 1U) * style.ItemSpacing.y;
+    const float popup_width = std::min(std::max(420.0F, list_width + side_padding * 2.0F), available_width);
+    const float popup_height = std::min(full_list_height + ImGui::GetFrameHeight() * 3.0F + style.WindowPadding.y * 2.0F + style.ItemSpacing.y * 5.0F,
+                                        std::max(300.0F, viewport->WorkSize.y - 24.0F));
     ImGui::SetNextWindowSize(ImVec2(popup_width, popup_height), ImGuiCond_Always);
 
     bool popup_open = true;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(side_padding, style.WindowPadding.y));
-    if (!ImGui::BeginPopupModal(
-            popup_id.c_str(),
-            &popup_open,
-            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+    if (!ImGui::BeginPopupModal(popup_id.c_str(), &popup_open,
+                                ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
+                                    ImGuiWindowFlags_NoResize)) {
         ImGui::PopStyleVar();
         return;
     }
 
+    if (panel_header_font_) {
+        ImGui::PushFont(panel_header_font_);
+    }
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.00F, 0.57F, 0.18F, 1.00F));
     ImGui::TextUnformatted(text(TextId::ChooseLanguage));
+    ImGui::PopStyleColor();
+    if (panel_header_font_) {
+        ImGui::PopFont();
+    }
     ImGui::Separator();
 
-    const auto& languages = language_definitions();
-    constexpr std::size_t kLanguageColumnCount = 2;
-    const std::size_t rows_per_column = (languages.size() + kLanguageColumnCount - 1U) / kLanguageColumnCount;
-    const float list_width = option_width * 2.0F + style.ItemSpacing.x;
-    const float full_list_height = static_cast<float>(rows_per_column) * kLanguageOptionRowHeight
-        + static_cast<float>(rows_per_column) * style.ItemSpacing.y;
-    const float close_button_area = ImGui::GetFrameHeight() + style.WindowPadding.y + style.ItemSpacing.y;
-    const float list_height = std::min(full_list_height, std::max(kLanguageOptionRowHeight * 4.0F, ImGui::GetContentRegionAvail().y - close_button_area));
-
-    ImGui::BeginChild("##LanguageList", ImVec2(list_width, list_height), ImGuiChildFlags_None);
-    for (std::size_t column = 0; column < kLanguageColumnCount; ++column) {
+    for (std::size_t column = 0; column < language_column_count; ++column) {
         if (column > 0) {
             ImGui::SameLine(0.0F, style.ItemSpacing.x);
         }
@@ -1346,9 +1579,10 @@ void App::render_language_picker_popup()
         }
         ImGui::EndGroup();
     }
-    ImGui::EndChild();
 
-    ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY() + style.ItemSpacing.y, ImGui::GetWindowHeight() - style.WindowPadding.y - ImGui::GetFrameHeight()));
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + style.ItemSpacing.y);
+    const float close_width = ImGui::CalcTextSize(text(TextId::Close)).x + style.FramePadding.x * 2.0F;
+    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - style.WindowPadding.x - close_width));
     if (ImGui::Button(imgui_label(TextId::Close, "CloseLanguagePicker").c_str()) || !popup_open) {
         ImGui::CloseCurrentPopup();
     }
@@ -1372,7 +1606,7 @@ void App::render_help_dialog()
     ImGui::SetNextWindowSize(ImVec2(popup_width, popup_height), ImGuiCond_Appearing);
 
     bool popup_open = true;
-    if (!ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_NoSavedSettings)) {
+    if (!ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoResize)) {
         return;
     }
 
@@ -1386,11 +1620,19 @@ void App::render_help_dialog()
     };
     auto section = [&](TextId title) {
         ImGui::Spacing();
+        if (panel_header_font_) {
+            ImGui::PushFont(panel_header_font_);
+        }
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.00F, 0.57F, 0.18F, 1.00F));
         ImGui::TextUnformatted(text(title));
+        ImGui::PopStyleColor();
+        if (panel_header_font_) {
+            ImGui::PopFont();
+        }
         ImGui::Separator();
     };
 
-    ImGui::BeginChild("##HelpContent", ImVec2(0.0F, content_height), ImGuiChildFlags_None);
+    ImGui::BeginChild("##HelpContent", ImVec2(0.0F, content_height), ImGuiChildFlags_Borders);
     section(TextId::HelpSectionKeyboard);
     wrapped_bullet(text(TextId::HelpUndo));
     wrapped_bullet(text(TextId::HelpRedo));
@@ -1410,6 +1652,8 @@ void App::render_help_dialog()
     ImGui::EndChild();
 
     ImGui::Spacing();
+    const float close_width = ImGui::CalcTextSize(text(TextId::Close)).x + style.FramePadding.x * 2.0F;
+    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - style.WindowPadding.x - close_width));
     if (ImGui::Button(imgui_label(TextId::Close, "CloseHelpDialog").c_str()) || !popup_open) {
         ImGui::CloseCurrentPopup();
     }
@@ -1432,7 +1676,7 @@ void App::render_about_dialog()
     ImGui::SetNextWindowSize(ImVec2(popup_width, popup_height), ImGuiCond_Appearing);
 
     bool popup_open = true;
-    if (!ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_NoSavedSettings)) {
+    if (!ImGui::BeginPopupModal(popup_id.c_str(), &popup_open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoResize)) {
         return;
     }
 
@@ -1444,17 +1688,27 @@ void App::render_about_dialog()
         ImGui::SameLine();
         ImGui::TextWrapped("%s", value);
     };
+    auto section = [&](const char* title) {
+        ImGui::Spacing();
+        if (panel_header_font_) {
+            ImGui::PushFont(panel_header_font_);
+        }
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.00F, 0.57F, 0.18F, 1.00F));
+        ImGui::TextUnformatted(title);
+        ImGui::PopStyleColor();
+        if (panel_header_font_) {
+            ImGui::PopFont();
+        }
+        ImGui::Separator();
+    };
 
-    ImGui::BeginChild("##AboutContent", ImVec2(0.0F, content_height), ImGuiChildFlags_None);
-    ImGui::TextUnformatted("PIXATTO");
-    ImGui::Separator();
+    ImGui::BeginChild("##AboutContent", ImVec2(0.0F, content_height), ImGuiChildFlags_Borders);
+    section("PIXATTO");
     ImGui::TextWrapped("%s", text(TextId::AboutProjectCredit));
     ImGui::TextWrapped("%s", text(TextId::AboutProjectLicense));
 
-    ImGui::Spacing();
-    ImGui::TextUnformatted(text(TextId::AboutThirdPartyTitle));
-    ImGui::Separator();
-    ImGui::TextUnformatted(text(TextId::AboutDependenciesTitle));
+    section(text(TextId::AboutThirdPartyTitle));
+    section(text(TextId::AboutDependenciesTitle));
     wrapped_bullet(text(TextId::AboutDependencySdl));
     wrapped_bullet(text(TextId::AboutDependencySdlImage));
     wrapped_bullet(text(TextId::AboutDependencyImGui));
@@ -1465,8 +1719,7 @@ void App::render_about_dialog()
     wrapped_bullet(text(TextId::AboutDependencyTinyXml));
     wrapped_bullet(text(TextId::AboutDependencyFfmpegExternal));
 
-    ImGui::Spacing();
-    ImGui::TextUnformatted(text(TextId::AboutPalettesTitle));
+    section(text(TextId::AboutPalettesTitle));
     ImGui::TextWrapped("%s", text(TextId::AboutPalettesCredit));
     for (const char* palette : kLospecPaletteCredits) {
         wrapped_bullet(palette);
@@ -1477,6 +1730,8 @@ void App::render_about_dialog()
     ImGui::EndChild();
 
     ImGui::Spacing();
+    const float close_width = ImGui::CalcTextSize(text(TextId::Close)).x + style.FramePadding.x * 2.0F;
+    ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - style.WindowPadding.x - close_width));
     if (ImGui::Button(imgui_label(TextId::Close, "CloseAboutDialog").c_str()) || !popup_open) {
         ImGui::CloseCurrentPopup();
     }
@@ -1486,11 +1741,17 @@ void App::render_about_dialog()
 
 void App::render_model_materials()
 {
-    ImGui::TextUnformatted(text(TextId::ModelMaterials));
-    ImGui::Separator();
+    const std::size_t panel = static_cast<std::size_t>(CollapsiblePanel::ModelMaterials);
+    PanelBlockLayout block = begin_panel_block("ModelMaterials", text(TextId::ModelMaterials), panel_header_font_, panel_expanded_[panel],
+                                               panel_animation_[panel], panel_content_height_[panel]);
+    if (!block.render_contents) {
+        end_panel_block(block);
+        return;
+    }
 
     if (model_.empty()) {
         ImGui::TextDisabled("%s", text(TextId::NoModelLoaded));
+        end_panel_block(block);
         return;
     }
 
@@ -1504,9 +1765,8 @@ void App::render_model_materials()
             name = slot.mesh_name + " / " + slot.material_name;
         }
 
-        const std::string current = slot.texture_index >= 0
-            ? model_texture_display_name(static_cast<std::size_t>(slot.texture_index))
-            : std::string(text(TextId::UntexturedGrey));
+        const std::string current =
+            slot.texture_index >= 0 ? model_texture_display_name(static_cast<std::size_t>(slot.texture_index)) : std::string(text(TextId::UntexturedGrey));
 
         ImGui::PushID(static_cast<int>(index));
         ImGui::BeginChild("MaterialSlot", ImVec2(0.0F, 66.0F), ImGuiChildFlags_Borders);
@@ -1530,16 +1790,23 @@ void App::render_model_materials()
         ImGui::EndChild();
         ImGui::PopID();
     }
+    end_panel_block(block);
 }
 
 void App::render_model_texture_drawer()
 {
     ImGui::Spacing();
-    ImGui::TextUnformatted(text(TextId::TextureDrawer));
-    ImGui::Separator();
+    const std::size_t panel = static_cast<std::size_t>(CollapsiblePanel::TextureDrawer);
+    PanelBlockLayout block = begin_panel_block("TextureDrawer", text(TextId::TextureDrawer), panel_header_font_, panel_expanded_[panel],
+                                               panel_animation_[panel], panel_content_height_[panel]);
+    if (!block.render_contents) {
+        end_panel_block(block);
+        return;
+    }
 
     if (model_.textures.empty()) {
         ImGui::TextWrapped("%s", text(TextId::TextureDrawerHint));
+        end_panel_block(block);
         return;
     }
 
@@ -1551,9 +1818,7 @@ void App::render_model_texture_drawer()
         const bool has_preview = preview && preview->handle != 0U && preview->width > 0 && preview->height > 0;
         if (has_preview) {
             const float scale = std::min(thumbnail / static_cast<float>(preview->width), thumbnail / static_cast<float>(preview->height));
-            const ImVec2 size(
-                std::max(1.0F, static_cast<float>(preview->width) * scale),
-                std::max(1.0F, static_cast<float>(preview->height) * scale));
+            const ImVec2 size(std::max(1.0F, static_cast<float>(preview->width) * scale), std::max(1.0F, static_cast<float>(preview->height) * scale));
             ImGui::Image(imgui_texture_id(preview->handle), size);
         } else {
             ImGui::Button("##TexturePlaceholder", ImVec2(thumbnail, thumbnail));
@@ -1580,19 +1845,22 @@ void App::render_model_texture_drawer()
         ImGui::Dummy(ImVec2(0.0F, style.ItemSpacing.y));
         ImGui::PopID();
     }
+    end_panel_block(block);
 }
 
 void App::render_preset_picker(ProcessSettings& settings, int& selected_palette)
 {
-    ImGui::TextUnformatted(text(TextId::Presets));
-    ImGui::Separator();
+    const std::size_t panel = static_cast<std::size_t>(CollapsiblePanel::Presets);
+    PanelBlockLayout block = begin_panel_block("Presets", text(TextId::Presets), panel_header_font_, panel_expanded_[panel], panel_animation_[panel],
+                                               panel_content_height_[panel], false);
+    if (!block.render_contents) {
+        end_panel_block(block);
+        return;
+    }
 
     const ImGuiStyle& style = ImGui::GetStyle();
     const float save_width = ImGui::CalcTextSize(text(TextId::SavePreset)).x + style.FramePadding.x * 2.0F;
     const float delete_width = ImGui::GetFrameHeight();
-    const float action_width = save_width + delete_width + style.ItemSpacing.x * 2.0F;
-    const float available_width = ImGui::GetContentRegionAvail().x;
-    const float picker_width = std::max(80.0F, available_width - action_width);
     const int selected_index = effective_selected_preset_index(settings);
     const char* preview = text(TextId::Presets);
     if (presets_.empty()) {
@@ -1604,7 +1872,7 @@ void App::render_preset_picker(ProcessSettings& settings, int& selected_palette)
     if (presets_.empty()) {
         ImGui::BeginDisabled();
     }
-    ImGui::SetNextItemWidth(picker_width);
+    ImGui::SetNextItemWidth(-1.0F);
     if (ImGui::BeginCombo("##PresetPicker", preview, ImGuiComboFlags_HeightLarge)) {
         for (std::size_t index = 0; index < presets_.size(); ++index) {
             const Preset& preset = presets_[index];
@@ -1626,17 +1894,13 @@ void App::render_preset_picker(ProcessSettings& settings, int& selected_palette)
         ImGui::EndDisabled();
     }
 
-    ImGui::SameLine();
     const bool can_delete = selected_index >= 0 && selected_index < static_cast<int>(presets_.size());
     if (!can_delete) {
         ImGui::BeginDisabled();
     }
     const bool delete_pressed = ImGui::Button("##DeletePreset", ImVec2(delete_width, 0.0F));
-    draw_wastebasket_icon(
-        ImGui::GetWindowDrawList(),
-        ImGui::GetItemRectMin(),
-        ImGui::GetItemRectMax(),
-        can_delete ? IM_COL32(255, 255, 255, 255) : ImGui::GetColorU32(ImGuiCol_TextDisabled));
+    draw_wastebasket_icon(ImGui::GetWindowDrawList(), ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
+                          can_delete ? IM_COL32(255, 255, 255, 255) : ImGui::GetColorU32(ImGuiCol_TextDisabled));
     if (delete_pressed) {
         selected_preset_ = selected_index;
         request_delete_selected_preset();
@@ -1652,6 +1916,7 @@ void App::render_preset_picker(ProcessSettings& settings, int& selected_palette)
         request_save_preset();
     }
     ImGui::Spacing();
+    end_panel_block(block);
 }
 
 void App::render_controls()
@@ -1668,62 +1933,231 @@ void App::render_controls()
 
     render_preset_picker(settings, selected_palette);
 
-    ImGui::TextUnformatted(text(TextId::Pixelize));
-    ImGui::Separator();
+    const std::size_t pixelize_panel = static_cast<std::size_t>(CollapsiblePanel::Pixelize);
+    const std::size_t dithering_panel = static_cast<std::size_t>(CollapsiblePanel::Dithering);
+    const std::size_t adjustments_panel = static_cast<std::size_t>(CollapsiblePanel::Adjustments);
 
-    slider_int_direct(TextId::PixelSize, "PixelSize", settings.pixel_size, 1, 128);
-
-    if (ImGui::BeginCombo(imgui_label(TextId::BlockSample, "BlockSample").c_str(), text(block_mode_label(settings.block_color_mode)))) {
-        for (BlockColorMode mode : {BlockColorMode::WeightedAverage, BlockColorMode::Average}) {
-            const bool selected = settings.block_color_mode == mode;
-            if (ImGui::Selectable(text(block_mode_label(mode)), selected)) {
-                settings.block_color_mode = mode;
-            }
-            if (selected) {
-                ImGui::SetItemDefaultFocus();
-            }
-        }
-        ImGui::EndCombo();
+    PanelBlockLayout pixelize_block =
+        begin_panel_block("Pixelize", text(TextId::Pixelize), panel_header_font_, panel_expanded_[pixelize_panel], panel_animation_[pixelize_panel],
+                          panel_content_height_[pixelize_panel]);
+    if (pixelize_block.opened_this_frame) {
+        panel_expanded_[dithering_panel] = false;
+        panel_expanded_[adjustments_panel] = false;
     }
+    if (pixelize_block.render_contents) {
 
-    const ImGuiStyle& style = ImGui::GetStyle();
-    const float use_palette_width = ImGui::GetFrameHeight()
-        + style.ItemInnerSpacing.x
-        + ImGui::CalcTextSize(text(TextId::UsePalette)).x;
-    const float preserve_transparency_width = ImGui::GetFrameHeight()
-        + style.ItemInnerSpacing.x
-        + ImGui::CalcTextSize(text(TextId::PreserveTransparency)).x;
-    const bool place_transparency_same_line = use_palette_width
-        + style.ItemSpacing.x
-        + preserve_transparency_width
-        <= ImGui::GetContentRegionAvail().x;
+        slider_int_direct(TextId::PixelSize, "PixelSize", settings.pixel_size, 1, 128);
 
-    ImGui::Checkbox(imgui_label(TextId::UsePalette, "UsePalette").c_str(), &settings.use_palette);
-    if (place_transparency_same_line) {
-        ImGui::SameLine();
-    }
-    ImGui::Checkbox(imgui_label(TextId::PreserveTransparency, "PreserveTransparency").c_str(), &settings.preserve_transparency);
-
-    if (settings.use_palette) {
-        if (selected_palette >= static_cast<int>(palettes_.size())) {
-            selected_palette = -1;
-        }
-        if (!palettes_.empty() && selected_palette < 0 && settings.palette.empty()) {
-            selected_palette = 0;
-            settings.palette = palettes_[0].colors;
+        ImGui::TextUnformatted(text(TextId::BlockSample));
+        ImGui::SetNextItemWidth(-1.0F);
+        if (ImGui::BeginCombo("##BlockSample", text(block_mode_label(settings.block_color_mode)))) {
+            for (BlockColorMode mode : {BlockColorMode::WeightedAverage, BlockColorMode::Average}) {
+                const bool selected = settings.block_color_mode == mode;
+                if (ImGui::Selectable(text(block_mode_label(mode)), selected)) {
+                    settings.block_color_mode = mode;
+                }
+                if (selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
         }
 
-        const bool has_saved_selection = selected_palette >= 0 && selected_palette < static_cast<int>(palettes_.size());
-        if (palettes_.empty()) {
-            ImGui::TextDisabled("%s", text(TextId::NoPalettesSaved));
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float use_palette_width = ImGui::GetFrameHeight() + style.ItemInnerSpacing.x + ImGui::CalcTextSize(text(TextId::UsePalette)).x;
+        const float preserve_transparency_width =
+            ImGui::GetFrameHeight() + style.ItemInnerSpacing.x + ImGui::CalcTextSize(text(TextId::PreserveTransparency)).x;
+        const bool place_transparency_same_line = use_palette_width + style.ItemSpacing.x + preserve_transparency_width <= ImGui::GetContentRegionAvail().x;
+
+        ImGui::Checkbox(imgui_label(TextId::UsePalette, "UsePalette").c_str(), &settings.use_palette);
+        if (place_transparency_same_line) {
+            ImGui::SameLine();
+        }
+        ImGui::Checkbox(imgui_label(TextId::PreserveTransparency, "PreserveTransparency").c_str(), &settings.preserve_transparency);
+
+        if (settings.use_palette) {
+            if (selected_palette >= static_cast<int>(palettes_.size())) {
+                selected_palette = -1;
+            }
+            if (!palettes_.empty() && selected_palette < 0 && settings.palette.empty()) {
+                selected_palette = 0;
+                settings.palette = palettes_[0].colors;
+            }
+
+            const bool has_saved_selection = selected_palette >= 0 && selected_palette < static_cast<int>(palettes_.size());
+            if (palettes_.empty()) {
+                ImGui::TextDisabled("%s", text(TextId::NoPalettesSaved));
+            } else {
+                const char* preview = has_saved_selection ? palettes_[static_cast<std::size_t>(selected_palette)].name.c_str() : text(TextId::UnsavedPalette);
+                ImGui::TextUnformatted(text(TextId::Palette));
+                ImGui::SetNextItemWidth(-1.0F);
+                if (ImGui::BeginCombo("##Palette", preview)) {
+                    for (int i = 0; i < static_cast<int>(palettes_.size()); ++i) {
+                        const bool selected = selected_palette == i;
+                        if (ImGui::Selectable(palettes_[static_cast<std::size_t>(i)].name.c_str(), selected)) {
+                            selected_palette = i;
+                            settings.palette = palettes_[static_cast<std::size_t>(i)].colors;
+                        }
+                        if (selected) {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+            }
+
+            if (ImGui::Button(imgui_label(TextId::NewPalette, "NewPalette").c_str())) {
+                request_new_palette();
+            }
+            ImGui::SameLine();
+
+            const bool can_save = has_saved_selection && !settings.palette.empty();
+            if (!can_save) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::Button(imgui_label(TextId::Save, "SavePalette").c_str())) {
+                request_save_palette();
+            }
+            if (!can_save) {
+                ImGui::EndDisabled();
+            }
+            ImGui::SameLine();
+
+            const bool can_save_new = !settings.palette.empty();
+            if (!can_save_new) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::Button(imgui_label(TextId::SaveNew, "SaveNewPalette").c_str())) {
+                request_save_palette_as();
+            }
+            if (!can_save_new) {
+                ImGui::EndDisabled();
+            }
+
+            if (has_saved_selection) {
+                if (ImGui::Button(imgui_label(TextId::DeletePalette, "DeletePalette").c_str())) {
+                    request_delete_selected_palette();
+                }
+            }
+
+            ImGui::Spacing();
+            const bool show_transparency_swatch = settings.preserve_transparency;
+            const std::size_t displayed_palette_count = settings.palette.size() + (show_transparency_swatch ? 1U : 0U);
+            ImGui::Text(text(TextId::PaletteCountFormat), displayed_palette_count, kMaxPaletteColors);
+            if (show_transparency_swatch) {
+                ImGui::SameLine();
+                ImGui::TextUnformatted("(*)");
+            }
+            if (settings.palette.empty()) {
+                ImGui::TextDisabled("%s", text(TextId::AddColorToBegin));
+            }
+
+            const float swatch = 16.0F;
+            const float start_x = ImGui::GetCursorScreenPos().x;
+            const float max_x = start_x + ImGui::GetContentRegionAvail().x;
+            const bool can_add_palette_color = settings.palette.size() < kMaxPaletteColors;
+            const auto continue_palette_swatch_row = [&](bool has_more) {
+                if (has_more && ImGui::GetItemRectMax().x + swatch + ImGui::GetStyle().ItemSpacing.x < max_x) {
+                    ImGui::SameLine();
+                }
+            };
+            for (std::size_t color_index = 0; color_index < settings.palette.size(); ++color_index) {
+                const Color32 color = settings.palette[color_index];
+                ImGui::PushID(static_cast<int>(color_index));
+                if (ImGui::ColorButton("swatch", color_to_imgui(color), ImGuiColorEditFlags_NoTooltip, ImVec2(swatch, swatch))) {
+                    request_edit_palette_color(color_index);
+                }
+                if (ImGui::IsItemHovered()) {
+                    const std::string tooltip = textf(TextId::EditColorFormat, {{"index", std::to_string(color_index + 1U)}});
+                    ImGui::SetTooltip("%s", tooltip.c_str());
+                }
+                ImGui::PopID();
+                const bool has_more = color_index + 1U < settings.palette.size() || show_transparency_swatch || can_add_palette_color;
+                continue_palette_swatch_row(has_more);
+            }
+
+            if (show_transparency_swatch) {
+                draw_transparency_swatch("TransparencySwatch", ImVec2(swatch, swatch));
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", text(TextId::PreserveTransparency));
+                }
+                continue_palette_swatch_row(can_add_palette_color);
+            }
+
+            if (can_add_palette_color) {
+                if (ImGui::Button("+##AddPaletteColor", ImVec2(swatch, swatch))) {
+                    request_add_palette_color();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", text(TextId::AddColor));
+                }
+            }
         } else {
-            const char* preview = has_saved_selection ? palettes_[static_cast<std::size_t>(selected_palette)].name.c_str() : text(TextId::UnsavedPalette);
-            if (ImGui::BeginCombo(imgui_label(TextId::Palette, "Palette").c_str(), preview)) {
-                for (int i = 0; i < static_cast<int>(palettes_.size()); ++i) {
-                    const bool selected = selected_palette == i;
-                    if (ImGui::Selectable(palettes_[static_cast<std::size_t>(i)].name.c_str(), selected)) {
-                        selected_palette = i;
-                        settings.palette = palettes_[static_cast<std::size_t>(i)].colors;
+            slider_int_direct(TextId::MaxColors, "MaxColors", settings.reduction_max_colors, 0, 256);
+            if (settings.reduction_max_colors == 0) {
+                slider_int_direct(TextId::ColorLevels, "ColorLevels", settings.color_levels, 2, 64);
+            }
+        }
+    }
+    end_panel_block(pixelize_block);
+
+    ImGui::Spacing();
+    PanelBlockLayout dithering_block =
+        begin_panel_block("Dithering", text(TextId::Dithering), panel_header_font_, panel_expanded_[dithering_panel], panel_animation_[dithering_panel],
+                          panel_content_height_[dithering_panel]);
+    if (dithering_block.opened_this_frame) {
+        panel_expanded_[pixelize_panel] = false;
+        panel_expanded_[adjustments_panel] = false;
+    }
+    if (dithering_block.render_contents) {
+        ImGui::TextUnformatted(text(TextId::Mode));
+        ImGui::SetNextItemWidth(-1.0F);
+        if (ImGui::BeginCombo("##DitherMode", text(dither_label(settings.dither_mode)))) {
+            for (DitherMode mode : {
+                     DitherMode::None,
+                     DitherMode::Bayer,
+                     DitherMode::BlueNoise,
+                     DitherMode::FloydSteinberg,
+                     DitherMode::FalseFloydSteinberg,
+                     DitherMode::FilterLite,
+                     DitherMode::ZhigangFan,
+                     DitherMode::ShiauFan,
+                     DitherMode::JarvisJudiceNinke,
+                     DitherMode::Atkinson,
+                     DitherMode::Stucki,
+                     DitherMode::Burkes,
+                     DitherMode::Sierra,
+                     DitherMode::TwoRowSierra,
+                     DitherMode::Riemersma,
+                     DitherMode::ClusterDot4x4,
+                     DitherMode::ClusterDot8x8,
+                     DitherMode::Horizontal2x2,
+                     DitherMode::Horizontal8x1,
+                     DitherMode::Horizontal12x4,
+                     DitherMode::Vertical2x2,
+                     DitherMode::Vertical1x8,
+                     DitherMode::Vertical4x12,
+                     DitherMode::Diagonal5x5,
+                 }) {
+                const bool selected = settings.dither_mode == mode;
+                if (ImGui::Selectable(text(dither_label(mode)), selected)) {
+                    settings.dither_mode = mode;
+                }
+                if (selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        if (settings.dither_mode == DitherMode::Bayer) {
+            ImGui::TextUnformatted(text(TextId::Pattern));
+            ImGui::SetNextItemWidth(-1.0F);
+            if (ImGui::BeginCombo("##BayerPattern", bayer_pattern_label(settings.bayer_matrix_size))) {
+                for (int size : {2, 4, 8, 16}) {
+                    const bool selected = settings.bayer_matrix_size == size;
+                    if (ImGui::Selectable(bayer_pattern_label(size), selected)) {
+                        settings.bayer_matrix_size = size;
                     }
                     if (selected) {
                         ImGui::SetItemDefaultFocus();
@@ -1733,286 +2167,151 @@ void App::render_controls()
             }
         }
 
-        if (ImGui::Button(imgui_label(TextId::NewPalette, "NewPalette").c_str())) {
-            request_new_palette();
-        }
-        ImGui::SameLine();
+        float dither_percent = settings.dither_amount * 100.0F;
+        float* dither_amount = &settings.dither_amount;
+        slider_float_direct_value(TextId::Amount, "DitherAmount", dither_percent, 0.0F, 100.0F, "%.0f%%",
+                                  [dither_amount](float value) { *dither_amount = value / 100.0F; });
+    }
+    end_panel_block(dithering_block);
 
-        const bool can_save = has_saved_selection && !settings.palette.empty();
-        if (!can_save) {
-            ImGui::BeginDisabled();
+    ImGui::Spacing();
+    PanelBlockLayout adjustments_block = begin_panel_block("Adjustments", text(TextId::Adjustments), panel_header_font_, panel_expanded_[adjustments_panel],
+                                                            panel_animation_[adjustments_panel], panel_content_height_[adjustments_panel]);
+    if (adjustments_block.opened_this_frame) {
+        panel_expanded_[pixelize_panel] = false;
+        panel_expanded_[dithering_panel] = false;
+    }
+    if (adjustments_block.render_contents) {
+        slider_float_direct(TextId::Brightness, "Brightness", settings.adjustments.brightness, -1.0F, 1.0F, "%.2f");
+        slider_float_direct(TextId::Contrast, "Contrast", settings.adjustments.contrast, -1.0F, 1.0F, "%.2f");
+        slider_float_direct(TextId::Gamma, "Gamma", settings.adjustments.gamma, 0.1F, 4.0F, "%.2f");
+        slider_float_direct(TextId::Saturation, "Saturation", settings.adjustments.saturation, 0.0F, 2.5F, "%.2f");
+        if (slider_float_direct(TextId::InputBlack, "InputBlack", settings.adjustments.input_black, 0.0F, 0.95F, "%.2f")) {
+            settings.adjustments.input_black = std::min(settings.adjustments.input_black, settings.adjustments.input_white - 0.01F);
         }
-        if (ImGui::Button(imgui_label(TextId::Save, "SavePalette").c_str())) {
-            request_save_palette();
+        if (slider_float_direct(TextId::InputWhite, "InputWhite", settings.adjustments.input_white, 0.05F, 1.0F, "%.2f")) {
+            settings.adjustments.input_white = std::max(settings.adjustments.input_white, settings.adjustments.input_black + 0.01F);
         }
-        if (!can_save) {
-            ImGui::EndDisabled();
+        if (slider_float_direct(TextId::OutputBlack, "OutputBlack", settings.adjustments.output_black, 0.0F, 0.95F, "%.2f")) {
+            settings.adjustments.output_black = std::min(settings.adjustments.output_black, settings.adjustments.output_white - 0.01F);
         }
-        ImGui::SameLine();
+        if (slider_float_direct(TextId::OutputWhite, "OutputWhite", settings.adjustments.output_white, 0.05F, 1.0F, "%.2f")) {
+            settings.adjustments.output_white = std::max(settings.adjustments.output_white, settings.adjustments.output_black + 0.01F);
+        }
 
-        const bool can_save_new = !settings.palette.empty();
-        if (!can_save_new) {
-            ImGui::BeginDisabled();
+        float tint[3] = {
+            settings.adjustments.tint.r / 255.0F,
+            settings.adjustments.tint.g / 255.0F,
+            settings.adjustments.tint.b / 255.0F,
+        };
+        ImGui::TextUnformatted(text(TextId::Tint));
+        ImGui::SetNextItemWidth(-1.0F);
+        if (ImGui::ColorEdit3("##Tint", tint, ImGuiColorEditFlags_NoInputs)) {
+            settings.adjustments.tint.r = static_cast<std::uint8_t>(std::lround(std::clamp(tint[0], 0.0F, 1.0F) * 255.0F));
+            settings.adjustments.tint.g = static_cast<std::uint8_t>(std::lround(std::clamp(tint[1], 0.0F, 1.0F) * 255.0F));
+            settings.adjustments.tint.b = static_cast<std::uint8_t>(std::lround(std::clamp(tint[2], 0.0F, 1.0F) * 255.0F));
         }
-        if (ImGui::Button(imgui_label(TextId::SaveNew, "SaveNewPalette").c_str())) {
-            request_save_palette_as();
-        }
-        if (!can_save_new) {
-            ImGui::EndDisabled();
-        }
-
-        if (has_saved_selection) {
-            if (ImGui::Button(imgui_label(TextId::DeletePalette, "DeletePalette").c_str())) {
-                request_delete_selected_palette();
-            }
-        }
+        slider_float_direct(TextId::TintStrength, "TintStrength", settings.adjustments.tint_strength, 0.0F, 1.0F, "%.2f");
 
         ImGui::Spacing();
-        const bool show_transparency_swatch = settings.preserve_transparency;
-        const std::size_t displayed_palette_count = settings.palette.size() + (show_transparency_swatch ? 1U : 0U);
-        ImGui::Text(text(TextId::PaletteCountFormat), displayed_palette_count, kMaxPaletteColors);
-        if (show_transparency_swatch) {
-            ImGui::SameLine();
-            ImGui::TextUnformatted("(*)");
-        }
-        if (settings.palette.empty()) {
-            ImGui::TextDisabled("%s", text(TextId::AddColorToBegin));
-        }
-
-        const float swatch = 16.0F;
-        const float start_x = ImGui::GetCursorScreenPos().x;
-        const float max_x = start_x + ImGui::GetContentRegionAvail().x;
-        const bool can_add_palette_color = settings.palette.size() < kMaxPaletteColors;
-        const auto continue_palette_swatch_row = [&](bool has_more) {
-            if (has_more && ImGui::GetItemRectMax().x + swatch + ImGui::GetStyle().ItemSpacing.x < max_x) {
-                ImGui::SameLine();
-            }
-        };
-        for (std::size_t color_index = 0; color_index < settings.palette.size(); ++color_index) {
-            const Color32 color = settings.palette[color_index];
-            ImGui::PushID(static_cast<int>(color_index));
-            if (ImGui::ColorButton("swatch", color_to_imgui(color), ImGuiColorEditFlags_NoTooltip, ImVec2(swatch, swatch))) {
-                request_edit_palette_color(color_index);
-            }
-            if (ImGui::IsItemHovered()) {
-                const std::string tooltip = textf(TextId::EditColorFormat, {{"index", std::to_string(color_index + 1U)}});
-                ImGui::SetTooltip("%s", tooltip.c_str());
-            }
-            ImGui::PopID();
-            const bool has_more = color_index + 1U < settings.palette.size() || show_transparency_swatch || can_add_palette_color;
-            continue_palette_swatch_row(has_more);
-        }
-
-        if (show_transparency_swatch) {
-            draw_transparency_swatch("TransparencySwatch", ImVec2(swatch, swatch));
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", text(TextId::PreserveTransparency));
-            }
-            continue_palette_swatch_row(can_add_palette_color);
-        }
-
-        if (can_add_palette_color) {
-            if (ImGui::Button("+##AddPaletteColor", ImVec2(swatch, swatch))) {
-                request_add_palette_color();
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", text(TextId::AddColor));
-            }
-        }
-    } else {
-        slider_int_direct(TextId::MaxColors, "MaxColors", settings.reduction_max_colors, 0, 256);
-        if (settings.reduction_max_colors == 0) {
-            slider_int_direct(TextId::ColorLevels, "ColorLevels", settings.color_levels, 2, 64);
+        if (ImGui::Button(imgui_label(TextId::ResetAdjustments, "ResetAdjustments").c_str())) {
+            settings.adjustments = {};
         }
     }
-
-    ImGui::Spacing();
-    ImGui::TextUnformatted(text(TextId::Dithering));
-    ImGui::Separator();
-    if (ImGui::BeginCombo(imgui_label(TextId::Mode, "DitherMode").c_str(), text(dither_label(settings.dither_mode)))) {
-        for (DitherMode mode : {
-                 DitherMode::None,
-                 DitherMode::Bayer,
-                 DitherMode::BlueNoise,
-                 DitherMode::FloydSteinberg,
-                 DitherMode::FalseFloydSteinberg,
-                 DitherMode::FilterLite,
-                 DitherMode::ZhigangFan,
-                 DitherMode::ShiauFan,
-                 DitherMode::JarvisJudiceNinke,
-                 DitherMode::Atkinson,
-                 DitherMode::Stucki,
-                 DitherMode::Burkes,
-                 DitherMode::Sierra,
-                 DitherMode::TwoRowSierra,
-                 DitherMode::Riemersma,
-                 DitherMode::ClusterDot4x4,
-                 DitherMode::ClusterDot8x8,
-                 DitherMode::Horizontal2x2,
-                 DitherMode::Horizontal8x1,
-                 DitherMode::Horizontal12x4,
-                 DitherMode::Vertical2x2,
-                 DitherMode::Vertical1x8,
-                 DitherMode::Vertical4x12,
-                 DitherMode::Diagonal5x5,
-            }) {
-            const bool selected = settings.dither_mode == mode;
-            if (ImGui::Selectable(text(dither_label(mode)), selected)) {
-                settings.dither_mode = mode;
-            }
-            if (selected) {
-                ImGui::SetItemDefaultFocus();
-            }
-        }
-        ImGui::EndCombo();
-    }
-
-    if (settings.dither_mode == DitherMode::Bayer) {
-        if (ImGui::BeginCombo(imgui_label(TextId::Pattern, "BayerPattern").c_str(), bayer_pattern_label(settings.bayer_matrix_size))) {
-            for (int size : {2, 4, 8, 16}) {
-                const bool selected = settings.bayer_matrix_size == size;
-                if (ImGui::Selectable(bayer_pattern_label(size), selected)) {
-                    settings.bayer_matrix_size = size;
-                }
-                if (selected) {
-                    ImGui::SetItemDefaultFocus();
-                }
-            }
-            ImGui::EndCombo();
-        }
-    }
-
-    float dither_percent = settings.dither_amount * 100.0F;
-    float* dither_amount = &settings.dither_amount;
-    slider_float_direct_value(
-        TextId::Amount,
-        "DitherAmount",
-        dither_percent,
-        0.0F,
-        100.0F,
-        "%.0f%%",
-        [dither_amount](float value) {
-            *dither_amount = value / 100.0F;
-        });
-
-    ImGui::Spacing();
-    ImGui::TextUnformatted(text(TextId::Adjustments));
-    ImGui::Separator();
-    slider_float_direct(TextId::Brightness, "Brightness", settings.adjustments.brightness, -1.0F, 1.0F, "%.2f");
-    slider_float_direct(TextId::Contrast, "Contrast", settings.adjustments.contrast, -1.0F, 1.0F, "%.2f");
-    slider_float_direct(TextId::Gamma, "Gamma", settings.adjustments.gamma, 0.1F, 4.0F, "%.2f");
-    slider_float_direct(TextId::Saturation, "Saturation", settings.adjustments.saturation, 0.0F, 2.5F, "%.2f");
-    if (slider_float_direct(TextId::InputBlack, "InputBlack", settings.adjustments.input_black, 0.0F, 0.95F, "%.2f")) {
-        settings.adjustments.input_black = std::min(settings.adjustments.input_black, settings.adjustments.input_white - 0.01F);
-    }
-    if (slider_float_direct(TextId::InputWhite, "InputWhite", settings.adjustments.input_white, 0.05F, 1.0F, "%.2f")) {
-        settings.adjustments.input_white = std::max(settings.adjustments.input_white, settings.adjustments.input_black + 0.01F);
-    }
-    if (slider_float_direct(TextId::OutputBlack, "OutputBlack", settings.adjustments.output_black, 0.0F, 0.95F, "%.2f")) {
-        settings.adjustments.output_black = std::min(settings.adjustments.output_black, settings.adjustments.output_white - 0.01F);
-    }
-    if (slider_float_direct(TextId::OutputWhite, "OutputWhite", settings.adjustments.output_white, 0.05F, 1.0F, "%.2f")) {
-        settings.adjustments.output_white = std::max(settings.adjustments.output_white, settings.adjustments.output_black + 0.01F);
-    }
-
-    float tint[3] = {
-        settings.adjustments.tint.r / 255.0F,
-        settings.adjustments.tint.g / 255.0F,
-        settings.adjustments.tint.b / 255.0F,
-    };
-    if (ImGui::ColorEdit3(imgui_label(TextId::Tint, "Tint").c_str(), tint, ImGuiColorEditFlags_NoInputs)) {
-        settings.adjustments.tint.r = static_cast<std::uint8_t>(std::lround(std::clamp(tint[0], 0.0F, 1.0F) * 255.0F));
-        settings.adjustments.tint.g = static_cast<std::uint8_t>(std::lround(std::clamp(tint[1], 0.0F, 1.0F) * 255.0F));
-        settings.adjustments.tint.b = static_cast<std::uint8_t>(std::lround(std::clamp(tint[2], 0.0F, 1.0F) * 255.0F));
-    }
-    slider_float_direct(TextId::TintStrength, "TintStrength", settings.adjustments.tint_strength, 0.0F, 1.0F, "%.2f");
-
-    ImGui::Spacing();
-    if (ImGui::Button(imgui_label(TextId::ResetAdjustments, "ResetAdjustments").c_str())) {
-        settings.adjustments = {};
-    }
+    end_panel_block(adjustments_block);
 
     record_control_history(edit.before());
 }
 
-void App::render_viewports()
-{
-    const ImVec2 available = ImGui::GetContentRegionAvail();
-    if (available.x <= 0.0F || available.y <= 0.0F) {
-        return;
+void App::render_viewports() {
+  const ImVec2 available = ImGui::GetContentRegionAvail();
+  if (available.x <= 0.0F || available.y <= 0.0F) {
+    return;
+  }
+
+  if (document_mode_ == DocumentMode::Video) {
+    ImGui::BeginChild("VideoPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
+    render_video_view();
+    ImGui::EndChild();
+    return;
+  }
+
+  if (viewport_mode_ == ViewportMode::Single) {
+    ImGui::BeginChild("ResultPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
+    render_working_view();
+    ImGui::EndChild();
+    return;
+  }
+
+  if (viewport_layout_ == ViewportLayout::SideBySide) {
+    if (available.x <= kViewportSplitterThickness * 2.0F) {
+      ImGui::BeginChild("OriginalPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
+      render_original_view();
+      ImGui::EndChild();
+      return;
     }
 
-    if (document_mode_ == DocumentMode::Video) {
-        ImGui::BeginChild("VideoPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-        render_video_view();
-        ImGui::EndChild();
-        return;
+    const float splitter_width = splitter_thickness_for(available.x);
+    const float usable_width = available.x - splitter_width;
+    float original_width =
+        split_size_from_ratio(viewport_split_ratio_, usable_width);
+    viewport_split_ratio_ = ratio_from_split_size(original_width, usable_width);
+
+    ImGui::BeginChild("OriginalPane", ImVec2(original_width, 0),
+                      ImGuiChildFlags_Borders);
+    render_original_view();
+    ImGui::EndChild();
+
+    ImGui::SameLine(0.0F, 0.0F);
+    float delta = 0.0F;
+    if (render_splitter("##ViewportSplitterX",
+                        ImVec2(splitter_width, available.y),
+                        ImGuiMouseCursor_ResizeEW, delta)) {
+      original_width =
+          split_size_from_ratio(viewport_split_ratio_, usable_width) + delta;
+      viewport_split_ratio_ =
+          ratio_from_split_size(original_width, usable_width);
     }
 
-    if (viewport_mode_ == ViewportMode::Single) {
-        ImGui::BeginChild("ResultPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-        render_working_view();
-        ImGui::EndChild();
-        return;
+    ImGui::SameLine(0.0F, 0.0F);
+    ImGui::BeginChild("ResultPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
+    render_working_view();
+    ImGui::EndChild();
+  } else {
+    if (available.y <= kViewportSplitterThickness * 2.0F) {
+      ImGui::BeginChild("ResultPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
+      render_working_view();
+      ImGui::EndChild();
+      return;
     }
 
-    if (viewport_layout_ == ViewportLayout::SideBySide) {
-        if (available.x <= kViewportSplitterThickness * 2.0F) {
-            ImGui::BeginChild("OriginalPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-            render_original_view();
-            ImGui::EndChild();
-            return;
-        }
+    const float splitter_height = splitter_thickness_for(available.y);
+    const float usable_height = available.y - splitter_height;
+    float result_height =
+        split_size_from_ratio(viewport_split_ratio_, usable_height);
+    viewport_split_ratio_ = ratio_from_split_size(result_height, usable_height);
 
-        const float splitter_width = splitter_thickness_for(available.x);
-        const float usable_width = available.x - splitter_width;
-        float original_width = split_size_from_ratio(viewport_split_ratio_, usable_width);
-        viewport_split_ratio_ = ratio_from_split_size(original_width, usable_width);
+    ImGui::BeginChild("ResultPane", ImVec2(0, result_height),
+                      ImGuiChildFlags_Borders);
+    render_working_view();
+    ImGui::EndChild();
 
-        ImGui::BeginChild("OriginalPane", ImVec2(original_width, 0), ImGuiChildFlags_Borders);
-        render_original_view();
-        ImGui::EndChild();
-
-        ImGui::SameLine(0.0F, 0.0F);
-        float delta = 0.0F;
-        if (render_splitter("##ViewportSplitterX", ImVec2(splitter_width, available.y), ImGuiMouseCursor_ResizeEW, delta)) {
-            original_width = split_size_from_ratio(viewport_split_ratio_, usable_width) + delta;
-            viewport_split_ratio_ = ratio_from_split_size(original_width, usable_width);
-        }
-
-        ImGui::SameLine(0.0F, 0.0F);
-        ImGui::BeginChild("ResultPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-        render_working_view();
-        ImGui::EndChild();
-    } else {
-        if (available.y <= kViewportSplitterThickness * 2.0F) {
-            ImGui::BeginChild("ResultPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-            render_working_view();
-            ImGui::EndChild();
-            return;
-        }
-
-        const float splitter_height = splitter_thickness_for(available.y);
-        const float usable_height = available.y - splitter_height;
-        float result_height = split_size_from_ratio(viewport_split_ratio_, usable_height);
-        viewport_split_ratio_ = ratio_from_split_size(result_height, usable_height);
-
-        ImGui::BeginChild("ResultPane", ImVec2(0, result_height), ImGuiChildFlags_Borders);
-        render_working_view();
-        ImGui::EndChild();
-
-        remove_vertical_item_spacing();
-        float delta = 0.0F;
-        if (render_splitter("##ViewportSplitterY", ImVec2(available.x, splitter_height), ImGuiMouseCursor_ResizeNS, delta)) {
-            result_height = split_size_from_ratio(viewport_split_ratio_, usable_height) + delta;
-            viewport_split_ratio_ = ratio_from_split_size(result_height, usable_height);
-        }
-
-        remove_vertical_item_spacing();
-        ImGui::BeginChild("OriginalPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
-        render_original_view();
-        ImGui::EndChild();
+    remove_vertical_item_spacing();
+    float delta = 0.0F;
+    if (render_splitter("##ViewportSplitterY",
+                        ImVec2(available.x, splitter_height),
+                        ImGuiMouseCursor_ResizeNS, delta)) {
+      result_height =
+          split_size_from_ratio(viewport_split_ratio_, usable_height) + delta;
+      viewport_split_ratio_ =
+          ratio_from_split_size(result_height, usable_height);
     }
+
+    remove_vertical_item_spacing();
+    ImGui::BeginChild("OriginalPane", ImVec2(0, 0), ImGuiChildFlags_Borders);
+    render_original_view();
+    ImGui::EndChild();
+  }
 }
 
 void App::render_original_view()
@@ -3403,16 +3702,7 @@ void App::rebuild_texture(Texture& texture, const Image& image, bool nearest)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(
-        GL_TEXTURE_2D,
-        0,
-        GL_RGBA,
-        image.width,
-        image.height,
-        0,
-        GL_RGBA,
-        GL_UNSIGNED_BYTE,
-        image.rgba.data());
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.width, image.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, image.rgba.data());
 }
 
 void App::configure_fonts()
@@ -3436,20 +3726,22 @@ void App::configure_fonts()
     builder.BuildRanges(&ranges);
 
     io.Fonts->Clear();
-    constexpr float kFontSize = 16.0F;
-    const std::vector<std::filesystem::path> base_candidates = {
+    constexpr float kFontSize = 17.0F;
+    std::vector<std::filesystem::path> base_candidates = bundled_font_candidates("AtkinsonHyperlegible-Regular.ttf");
+    base_candidates.insert(base_candidates.end(), {
         R"(C:\Windows\Fonts\segoeui.ttf)",
         R"(C:\Windows\Fonts\arial.ttf)",
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    };
+    });
 
-    const bool loaded_base = add_font_from_candidates(base_candidates, kFontSize, nullptr, ranges.Data);
-    if (!loaded_base) {
-        io.Fonts->AddFontDefault();
+    ImFont* base_font = add_font_from_candidates(base_candidates, kFontSize, nullptr, ranges.Data);
+    if (!base_font) {
+        base_font = io.Fonts->AddFontDefault();
     }
+    io.FontDefault = base_font;
 
     ImFontConfig merge_config;
     merge_config.MergeMode = true;
@@ -3491,9 +3783,36 @@ void App::configure_fonts()
         "/usr/share/fonts/truetype/unifont/unifont.ttf",
     };
 
-    for (const std::filesystem::path& candidate : fallback_candidates) {
+    for (const std::filesystem::path& candidate : fallback_candidates)
+    {
         std::error_code ec;
-        if (!std::filesystem::is_regular_file(candidate, ec)) {
+        if (!std::filesystem::is_regular_file(candidate, ec))
+        {
+            continue;
+        }
+        io.Fonts->AddFontFromFileTTF(candidate.string().c_str(), kFontSize, &merge_config, ranges.Data);
+    }
+
+    std::vector<std::filesystem::path> bold_candidates = bundled_font_candidates("AtkinsonHyperlegible-Bold.ttf");
+    bold_candidates.insert(bold_candidates.end(), {
+        R"(C:\Windows\Fonts\segoeuib.ttf)",
+        R"(C:\Windows\Fonts\arialbd.ttf)",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    });
+    panel_header_font_ = add_font_from_candidates(bold_candidates, kFontSize, nullptr, ranges.Data);
+    if (!panel_header_font_)
+    {
+        panel_header_font_ = base_font;
+        return;
+    }
+
+    for (const std::filesystem::path& candidate : fallback_candidates)
+    {
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(candidate, ec))
+        {
             continue;
         }
         io.Fonts->AddFontFromFileTTF(candidate.string().c_str(), kFontSize, &merge_config, ranges.Data);
@@ -5572,7 +5891,11 @@ bool App::can_redo() const noexcept
 
 bool App::slider_int_direct(TextId label, const char* id, int& value, int minimum, int maximum)
 {
-    const std::string widget_label = imgui_label(label, id);
+    char value_text[32]{};
+    std::snprintf(value_text, sizeof(value_text), "%d", value);
+    render_control_label_value(text(label), value_text);
+    ImGui::SetNextItemWidth(-1.0F);
+    const std::string widget_label = "##" + std::string(id);
     const bool changed = ImGui::SliderInt(widget_label.c_str(), &value, minimum, maximum, "%d", ImGuiSliderFlags_AlwaysClamp);
     if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
         int* target = &value;
@@ -5585,7 +5908,11 @@ bool App::slider_int_direct(TextId label, const char* id, int& value, int minimu
 
 bool App::slider_float_direct(TextId label, const char* id, float& value, float minimum, float maximum, const char* format)
 {
-    const std::string widget_label = imgui_label(label, id);
+    char value_text[64]{};
+    std::snprintf(value_text, sizeof(value_text), format, value);
+    render_control_label_value(text(label), value_text);
+    ImGui::SetNextItemWidth(-1.0F);
+    const std::string widget_label = "##" + std::string(id);
     const bool changed = ImGui::SliderFloat(widget_label.c_str(), &value, minimum, maximum, format, ImGuiSliderFlags_AlwaysClamp);
     if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
         float* target = &value;
@@ -5599,7 +5926,11 @@ bool App::slider_float_direct(TextId label, const char* id, float& value, float 
 bool App::slider_float_direct_value(TextId label, const char* id, float value, float minimum, float maximum, const char* format, std::function<void(float)> apply)
 {
     float editable = value;
-    const std::string widget_label = imgui_label(label, id);
+    char value_text[64]{};
+    std::snprintf(value_text, sizeof(value_text), format, value);
+    render_control_label_value(text(label), value_text);
+    ImGui::SetNextItemWidth(-1.0F);
+    const std::string widget_label = "##" + std::string(id);
     const bool changed = ImGui::SliderFloat(widget_label.c_str(), &editable, minimum, maximum, format, ImGuiSliderFlags_AlwaysClamp);
     if (changed) {
         apply(std::clamp(editable, minimum, maximum));
